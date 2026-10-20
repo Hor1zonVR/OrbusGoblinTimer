@@ -5,3 +5,4 @@
 .vs/
 *.dll
 *.pdb
+.build-refs-path.txt

@@ -8,7 +8,7 @@ A lightweight client-side BepInEx IL2CPP plugin for OrbusVR **Community Edition*
 - Uses the historical **four-hour** spawn interval. Source: [official 18 June 2019 patch notes](https://store.steampowered.com/news/posts/?appids=746930&enddate=1561494246).
 - Remembers the last confirmed spawn UTC time in the instance's BepInEx config. On future logins it extrapolates the repeating four-hour cycle.
 - Read-only PowerUI `set_innerHTML` observation on the original Community client and modern Spades client to detect English Trickster Goblin spawn announcements if they pass through those UI elements.
-- ****Ctrl+Shift+F6 on the PC keyboard**** manually records a goblin spawn *at the moment you press it*, if the automatic announcement hook cannot observe that client's notification path. This is a manual calibration fallback, **not** a magic lookup of the actual server time.
+- **Ctrl+Shift+F6 on the PC keyboard** manually records a goblin spawn *at the moment you press it*, if the automatic announcement hook cannot observe that client's notification path. This is a manual calibration fallback, **not** a magic lookup of the actual server time.
 - If no reliable first spawn has been observed, HUD displays `--:--:--` and `Waiting for spawn sync`, **not an invented timer**.
 - If last sync was more than 24 hours ago, the HUD explicitly labels the countdown as an **estimate** (server resets can change the schedule).
 
@@ -42,9 +42,9 @@ Then publish directly to **RebornManager**:
 .\release.ps1
 ```
 
-The script checks countdown tests, selects a BepInEx-prepared RM instance for local build references, compiles the plugin, commits/pushes any source changes, and publishes **one** `OrbusGoblinTimer.dll` on a **stable** GitHub release. If multiple game instances have generated interop references, choose the correct instance from its interactive list. Build references are read-only; no game folder is directly changed by the script.
+The script checks countdown tests, selects a BepInEx-prepared RM instance for local build references, compiles the plugin, commits/pushes any source changes, and publishes **one** `OrbusGoblinTimer.dll` on a **stable** GitHub release. The publisher remembers its build-reference path in the Git-ignored `.build-refs-path.txt`, so normal updates do not ask you to choose again. On the first run without a saved path it automatically selects the most recently used compatible Orbus instance. If needed, `-GameDir 'C:\\path\\to\\instance'` saves a different choice for all future releases. Build references are read-only; no game folder is directly changed by the script.
 
-When you specifically want a **GitHub preview that RM intentionally ignores**, use `.\release.ps1 -Preview`. Because the user prefers testing directly through RM, the default is stable, though **v0.1.0 is still experimental** and needs in-game validation. After running the stable release, close Orbus and use RM's Add mods / Check updates to install the mod in the selected game instance.
+When you specifically want a **GitHub preview that RM intentionally ignores**, use `.\release.ps1 -Preview`. Because the user prefers testing directly through RM, the default is stable, though **v0.1.1 is still experimental** and needs in-game validation. After running the stable release, close Orbus and use RM's Add mods / Check updates to install the mod in the selected game instance.
 
 Subsequent updates from GitHub:
 

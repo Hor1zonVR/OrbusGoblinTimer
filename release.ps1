@@ -66,6 +66,101 @@ try {
     $changesBefore = @(& git status --porcelain)
     Assert-Exit 'Checking local changes'
 
+    # The references choice is local PC state, never a committed repo setting.
+    # Reuse it on subsequent builds; if no cache exists, choose a reasonable
+    # installed instance automatically instead of prompting for a number.
+    $referenceCache = Join-Path $root '.build-refs-path.txt'
+    $referenceFiles = @(
+        'BepInEx\core\BepInEx.Core.dll',
+        'BepInEx\core\BepInEx.Unity.IL2CPP.dll',
+        'BepInEx\core\Il2CppInterop.Runtime.dll',
+        'BepInEx\core\0Harmony.dll',
+        'BepInEx\interop\Il2Cppmscorlib.dll',
+        'BepInEx\interop\UnityEngine.CoreModule.dll',
+        'BepInEx\interop\UnityEngine.TextRenderingModule.dll'
+    )
+
+    function Normalize-GameDir([string]$rawPath) {
+        return [IO.Path]::GetFullPath(
+            [Environment]::ExpandEnvironmentVariables($rawPath.Trim().Trim('"'))
+        )
+    }
+
+    function Has-BuildReferences([string]$path) {
+        if ([string]::IsNullOrWhiteSpace($path)) { return $false }
+        try {
+            $resolved = Normalize-GameDir $path
+            foreach ($file in $referenceFiles) {
+                if (!(Test-Path -LiteralPath (Join-Path $resolved $file) -PathType Leaf)) {
+                    return $false
+                }
+            }
+            return $true
+        } catch { return $false }
+    }
+
+    if (![string]::IsNullOrWhiteSpace($GameDir)) {
+        $GameDir = Normalize-GameDir $GameDir
+        if (!(Has-BuildReferences $GameDir)) {
+            throw "Explicit -GameDir '$GameDir' is missing required BepInEx/interop DLLs."
+        }
+        Write-Host "Using explicitly selected build references." -ForegroundColor Cyan
+    } else {
+        if (Test-Path -LiteralPath $referenceCache -PathType Leaf) {
+            $saved = (Get-Content -LiteralPath $referenceCache -Raw).Trim()
+            if (Has-BuildReferences $saved) {
+                $GameDir = Normalize-GameDir $saved
+                Write-Host "Reusing saved BepInEx build references; no selection needed." -ForegroundColor Green
+            } else {
+                Write-Host "Previously saved build-reference folder is no longer valid; searching installed instances." -ForegroundColor Yellow
+            }
+        }
+
+        if ([string]::IsNullOrWhiteSpace($GameDir)) {
+            $instanceRoot = Join-Path $env:LOCALAPPDATA 'OrbusRebornModdingInstances'
+            $candidates = @()
+            if (Test-Path -LiteralPath $instanceRoot -PathType Container) {
+                $candidates = @(Get-ChildItem -LiteralPath $instanceRoot -Directory |
+                    Where-Object { Has-BuildReferences $_.FullName })
+            }
+            if ($candidates.Count -eq 0) {
+                throw "No compatible local BepInEx build references found in $instanceRoot. Use .\release.ps1 -GameDir 'C:\path\to\your\modded\instance'."
+            }
+
+            # Prefer whichever instance was used most recently; tie-break to
+            # Community's original readable interop, then stable name order.
+            $ordered = @($candidates | ForEach-Object {
+                $logPath = Join-Path $_.FullName 'BepInEx\LogOutput.log'
+                $lastUsed = if (Test-Path -LiteralPath $logPath -PathType Leaf) {
+                    (Get-Item -LiteralPath $logPath).LastWriteTimeUtc
+                } else {
+                    [DateTime]::MinValue
+                }
+                [PSCustomObject]@{
+                    Path = $_.FullName
+                    LastUsed = $lastUsed
+                    Community = (Test-Path -LiteralPath (Join-Path $_.FullName 'vrclient.exe') -PathType Leaf)
+                }
+            } | Sort-Object @{ Expression = 'LastUsed'; Descending = $true },
+                            @{ Expression = 'Community'; Descending = $true },
+                            @{ Expression = 'Path'; Descending = $false })
+            $GameDir = $ordered[0].Path
+            Write-Host "Auto-selected a compatible BepInEx instance: $GameDir" -ForegroundColor Cyan
+            if ($candidates.Count -gt 1) {
+                Write-Host "To use another instance permanently, run .\release.ps1 -GameDir 'C:\path\to\instance' once." -ForegroundColor DarkGray
+            }
+        }
+    }
+
+    # Save only a validated path; this local ignored file survives git pulls.
+    # Calling -GameDir again updates the saved choice for every future build.
+    $GameDir = Normalize-GameDir $GameDir
+    if (!(Has-BuildReferences $GameDir)) {
+        throw "Build reference validation failed for '$GameDir'."
+    }
+    [IO.File]::WriteAllText($referenceCache, $GameDir + [Environment]::NewLine,
+        (New-Object System.Text.UTF8Encoding($false)))
+
     # If this version has already been released, automatically bump the PATCH version,
     # avoiding the repetitive manual edit needed on each RM test release.
     $source = Get-Content -LiteralPath $pluginFile -Raw
@@ -103,55 +198,7 @@ try {
         Write-Host "Existing release detected. Automatically bumped plugin to $version." -ForegroundColor Yellow
     }
 
-    if ([string]::IsNullOrWhiteSpace($GameDir)) {
-        $instanceRoot = Join-Path $env:LOCALAPPDATA 'OrbusRebornModdingInstances'
-        $candidates = @()
-        if (Test-Path $instanceRoot -PathType Container) {
-            $candidates = @(Get-ChildItem -LiteralPath $instanceRoot -Directory |
-                Where-Object {
-                    Test-Path (Join-Path $_.FullName 'BepInEx\interop\UnityEngine.CoreModule.dll') -PathType Leaf
-                })
-        }
-        # Compile against Community's readable interop by preference.
-        # Runtime reflection keeps the compiled DLL independent of Assembly-CSharp types.
-        $community = @($candidates | Where-Object {
-            Test-Path (Join-Path $_.FullName 'vrclient.exe') -PathType Leaf
-        })
-        $choices = if ($community.Count -gt 0) { $community } else { $candidates }
-        if ($choices.Count -eq 0) {
-            throw "No generated BepInEx interop found in $instanceRoot. Supply -GameDir 'C:\path\to\your\modded game'."
-        }
-        if ($choices.Count -eq 1) {
-            $GameDir = $choices[0].FullName
-        } else {
-            Write-Host 'Choose a game used ONLY to read BepInEx build references:' -ForegroundColor Cyan
-            for ($i = 0; $i -lt $choices.Count; $i++) {
-                Write-Host "  [$($i+1)] $($choices[$i].FullName)"
-            }
-            $selection = Read-Host 'Enter number'
-            $number = 0
-            if (-not [int]::TryParse($selection, [ref]$number) -or
-                $number -lt 1 -or $number -gt $choices.Count) {
-                throw 'Invalid game selection.'
-            }
-            $GameDir = $choices[$number - 1].FullName
-        }
-    }
 
-    $GameDir = [IO.Path]::GetFullPath([Environment]::ExpandEnvironmentVariables($GameDir.Trim().Trim('"')))
-    foreach ($relative in @(
-        'BepInEx\core\BepInEx.Core.dll',
-        'BepInEx\core\BepInEx.Unity.IL2CPP.dll',
-        'BepInEx\core\Il2CppInterop.Runtime.dll',
-        'BepInEx\core\0Harmony.dll',
-        'BepInEx\interop\Il2Cppmscorlib.dll',
-        'BepInEx\interop\UnityEngine.CoreModule.dll',
-        'BepInEx\interop\UnityEngine.TextRenderingModule.dll'
-    )) {
-        if (!(Test-Path (Join-Path $GameDir $relative) -PathType Leaf)) {
-            throw "Missing build reference: $relative (in $GameDir)."
-        }
-    }
 
     Write-Host "Build references: $GameDir" -ForegroundColor Cyan
     Write-Host 'This script WILL NOT install or change files in that game folder.' -ForegroundColor DarkGray
@@ -197,7 +244,7 @@ try {
     Assert-Exit 'Getting release commit'
 
     Write-Host "[4/4] Publishing $tag with OrbusGoblinTimer.dll..." -ForegroundColor Yellow
-    $notes = "OrbusGoblinTimer ${tag}: experimental local Trickster Goblin headset countdown. Starts after observing a confirmed spawn announcement or manual F9 sync. Community/Spades event interception and current server interval need in-game verification. No position tracking. See README."
+    $notes = "OrbusGoblinTimer ${tag}: experimental local Trickster Goblin headset countdown. Starts after observing a confirmed spawn announcement or manual Ctrl+Shift+F6 sync. Community/Spades event interception and current server interval need in-game verification. No position tracking. See README."
     $args = @('release','create',$tag,$dll,'--repo',$repo,'--target',$commit,
               '--title',"OrbusGoblinTimer $tag",'--notes',$notes)
     if ($Preview) { $args += '--prerelease' }

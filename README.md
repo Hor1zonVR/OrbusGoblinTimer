@@ -1,4 +1,4 @@
-# OrbusGoblinTimer (v0.1.2 experimental)
+# OrbusGoblinTimer (v0.1.3 experimental)
 
 A lightweight client-side BepInEx IL2CPP plugin for OrbusVR **Community Edition** and **Spades/Renewed**. It displays a **Trickster Goblin countdown next to the in-game Level number**, when that Unity UI label is available, or a significantly larger upper-left fallback when it is not. No coordinates, tracking or gameplay modifications.
 
@@ -11,6 +11,24 @@ A lightweight client-side BepInEx IL2CPP plugin for OrbusVR **Community Edition*
 - **Ctrl+Shift+F6 on the PC keyboard** manually records a goblin spawn *at the moment you press it*, if the automatic announcement hook cannot observe that client's notification path. This is a manual calibration fallback, **not** a magic lookup of the actual server time.
 - If no reliable first spawn has been observed, HUD displays **GOBLIN: SYNC NEEDED** in large readable text, **not an invented timer**.
 - If last sync was more than 24 hours ago, the readout appends **~** to indicate an estimated time (server restarts can change the schedule).
+
+## v0.1.3 invisible HUD diagnosis and visibility fix
+
+The third live Spades log proves the DLL loaded, the game UI camera existed,
+and the UnityEngine.UI.Text level-search failed; the fallback was installed at
+an extreme upper-left headset angle and was still almost microscopic
+(`characterSize=0.0048`, only 4.8 mm per nominal character at 1.08 m).
+The fallback is now positioned safely inside the stereo view, with
+`characterSize=0.065` (over **13 times larger**) and the source code
+verifies/logs viewport visibility rather than assuming the text is visible.
+The mod additionally searches for an actual Unity `TextMesh` "Level NN"
+within the local rig's UI layer and attaches a same-parent label if found.
+If the level display uses PowerUI or other components, the independent
+fallback remains. The mod never modifies game-native HUD elements.
+
+Look for the `Visible HUD diagnostic: viewport=...` line in the BepInEx
+log, which records actual camera position, active state, renderer status
+and text. Do not manually set a spawn time until a real spawn occurs.
 
 ## v0.1.2 readability and positioning
 

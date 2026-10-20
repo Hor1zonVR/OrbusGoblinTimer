@@ -7,7 +7,7 @@ using BepInEx.Unity.IL2CPP;
 
 namespace OrbusGoblinTimer;
 
-[BepInPlugin("com.horizon.orbusgoblintimer", "OrbusGoblinTimer", "0.1.2")]
+[BepInPlugin("com.horizon.orbusgoblintimer", "OrbusGoblinTimer", "0.1.3")]
 public sealed class Plugin : BasePlugin
 {
     internal static ManualLogSource Logger = null!;
@@ -43,7 +43,7 @@ public sealed class Plugin : BasePlugin
 
         if (ObservePowerUiAnnouncements.Value) AnnouncementObserver.Install();
         AddComponent<GoblinHud>();
-        Log.LogInfo("[GoblinTimer] v0.1.2 loaded; top UI readout enabled=" + Enabled.Value +
+        Log.LogInfo("[GoblinTimer] v0.1.3 loaded; top UI readout enabled=" + Enabled.Value +
                     "; interval=" + SpawnIntervalHours.Value + " hours.");
     }
 

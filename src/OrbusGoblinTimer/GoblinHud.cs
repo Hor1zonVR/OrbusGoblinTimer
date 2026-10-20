@@ -16,7 +16,7 @@ public sealed class GoblinHud : MonoBehaviour
     public GoblinHud(IntPtr pointer) : base(pointer) { }
 
     private const int TopUiLayer = 23;
-    private static readonly Vector3 FallbackOffset = new(-0.86f, 0.87f, 1.08f);
+    private static readonly Vector3 FallbackOffset = new(-0.50f, 0.46f, 1.25f);
 
     private GameObject? _fallbackRoot;
     private TextMesh? _fallbackText;
@@ -26,6 +26,12 @@ public sealed class GoblinHud : MonoBehaviour
     private float _nextTextUpdate;
     private bool _loggedMissingCamera;
     private bool _loggedMissingLevel;
+    private bool _loggedHudProjection;
+    private bool _loggedMissingLevelMesh;
+    private float _nextMeshSearch;
+    private GameObject? _meshRoot;
+    private TextMesh? _meshText;
+    private TextMesh? _meshLevelAnchor;
 #if ORBUS_UI_AVAILABLE
     private GameObject? _nativeRoot;
     private Text? _nativeText;
@@ -41,13 +47,13 @@ public sealed class GoblinHud : MonoBehaviour
         _fallbackText = _fallbackRoot.AddComponent<TextMesh>();
         _fallbackText.anchor = TextAnchor.MiddleLeft;
         _fallbackText.alignment = TextAlignment.Left;
-        _fallbackText.fontSize = 44;
-        // v0.1.1 used 0.0017. This text is about 3x its former visual scale,
-        // and uses one concise line with no miniature subheading.
-        _fallbackText.characterSize = 0.0048f;
+        _fallbackText.fontSize = 48;
+        // TextMesh characterSize uses world units; previous 0.0048m was
+        // practically illegible in VR. 0.065m gives a visibly sized glyph at 1.25m.
+        _fallbackText.characterSize = 0.065f;
         _fallbackText.fontStyle = FontStyle.Bold;
         _fallbackText.color = new Color(1.0f, 0.92f, 0.72f, 1f);
-        _fallbackText.text = "GOBLIN: SYNC NEEDED";
+        _fallbackText.text = "GOBLIN: NO SYNC";
         try
         {
             Font? font = Resources.GetBuiltinResource<Font>("Arial.ttf");
@@ -63,7 +69,7 @@ public sealed class GoblinHud : MonoBehaviour
             Plugin.Logger.LogWarning("[GoblinTimer] Fallback font: " + ex.Message);
         }
         _fallbackRoot.SetActive(false);
-        Plugin.Logger.LogInfo("[GoblinTimer] v0.1.2 HUD ready: targeting real Level HUD text; large upper-left fallback.");
+        Plugin.Logger.LogInfo("[GoblinTimer] v0.1.3: real Level HUD search plus readable, in-view fallback.");
 #if !ORBUS_UI_AVAILABLE
         Plugin.Logger.LogWarning("[GoblinTimer] Unity UI interop not available in build references. " +
             "Native Level-label matching disabled; readable camera fallback will be used.");
@@ -82,6 +88,7 @@ public sealed class GoblinHud : MonoBehaviour
         if (!Plugin.Enabled.Value)
         {
             if (_fallbackRoot.activeSelf) _fallbackRoot.SetActive(false);
+            if (_meshRoot != null && _meshRoot.activeSelf) _meshRoot.SetActive(false);
 #if ORBUS_UI_AVAILABLE
             if (_nativeRoot != null && _nativeRoot.activeSelf) _nativeRoot.SetActive(false);
 #endif
@@ -109,11 +116,20 @@ public sealed class GoblinHud : MonoBehaviour
         }
 #endif
 
+        if (now >= _nextMeshSearch)
+        {
+            _nextMeshSearch = now + 4f;
+            if (_meshLevelAnchor == null || !_meshLevelAnchor.gameObject.activeInHierarchy ||
+                _meshText == null || _meshRoot == null)
+                FindLevelTextMesh();
+        }
+
         if (now >= _nextTextUpdate)
         {
             _nextTextUpdate = now + 0.65f;
             string status = BuildDisplayText();
             _fallbackText.text = status;
+            if (_meshText != null) _meshText.text = status;
 #if ORBUS_UI_AVAILABLE
             if (_nativeText != null) _nativeText.text = status;
 #endif
@@ -133,10 +149,20 @@ public sealed class GoblinHud : MonoBehaviour
             return;
         }
 #endif
-        bool fallbackVisible = _uiCamera != null && _uiCamera.isActiveAndEnabled &&
+        // A native TextMesh beside the actual level takes priority over our
+        // independent camera-space fallback, but never hides the original HUD.
+        bool meshVisible = _meshText != null && _meshRoot != null &&
+            _meshLevelAnchor != null && _meshLevelAnchor.gameObject.activeInHierarchy &&
+            _meshRoot.transform.parent == _meshLevelAnchor.transform.parent;
+        if (_meshRoot != null && _meshRoot.activeSelf != meshVisible)
+            _meshRoot.SetActive(meshVisible);
+        bool fallbackVisible = !meshVisible &&
+            _uiCamera != null && _uiCamera.isActiveAndEnabled &&
             _fallbackRoot.transform.parent == _uiCamera.transform;
         if (_fallbackRoot.activeSelf != fallbackVisible)
             _fallbackRoot.SetActive(fallbackVisible);
+        if (fallbackVisible && !_loggedHudProjection)
+            LogFallbackProjection();
     }
 
     private static string BuildDisplayText()
@@ -144,7 +170,7 @@ public sealed class GoblinHud : MonoBehaviour
         DateTimeOffset now = DateTimeOffset.UtcNow;
         if (!SpawnClock.TryParseUtc(Plugin.LastObservedSpawnUtc.Value,
             out DateTimeOffset last))
-            return "GOBLIN: SYNC NEEDED";
+            return "GOBLIN: NO SYNC";
 
         DateTimeOffset next = SpawnClock.NextSpawn(last, now,
             Plugin.SpawnIntervalHours.Value);
@@ -164,13 +190,14 @@ public sealed class GoblinHud : MonoBehaviour
                         StringComparison.Ordinal)) continue;
 
                 _uiCamera = camera;
+                _loggedHudProjection = false;
                 _fallbackRoot!.transform.SetParent(camera.transform, false);
                 _fallbackRoot.transform.localPosition = FallbackOffset;
                 _fallbackRoot.transform.localRotation = Quaternion.identity;
                 _fallbackRoot.transform.localScale = Vector3.one;
                 _loggedMissingCamera = false;
                 Plugin.Logger.LogInfo("[GoblinTimer] Large camera HUD attached. " +
-                    "Fallback local offset=" + FallbackOffset + ", fontSize=44, characterSize=0.0048.");
+                    "Fallback local offset=" + FallbackOffset + ", fontSize=48, characterSize=0.065.");
                 return;
             }
             _uiCamera = null;
@@ -183,6 +210,112 @@ public sealed class GoblinHud : MonoBehaviour
         catch (Exception ex)
         {
             Plugin.Logger.LogWarning("[GoblinTimer] Top camera lookup failed: " + ex.Message);
+        }
+    }
+
+
+    private void LogFallbackProjection()
+    {
+        if (_uiCamera == null || _fallbackRoot == null) return;
+        try
+        {
+            Vector3 projected = _uiCamera.WorldToViewportPoint(
+                _fallbackRoot.transform.position);
+            bool inView = projected.z > _uiCamera.nearClipPlane &&
+                          projected.x > 0.05f && projected.x < 0.90f &&
+                          projected.y > 0.08f && projected.y < 0.92f;
+            if (!inView)
+            {
+                // Never leave the readout at the edge of the VR frustum.
+                _fallbackRoot.transform.localPosition =
+                    new Vector3(-0.22f, 0.28f, 1.25f);
+                projected = _uiCamera.WorldToViewportPoint(
+                    _fallbackRoot.transform.position);
+                Plugin.Logger.LogWarning("[GoblinTimer] HUD position was out of view; " +
+                    "moved to safe upper-center-left location.");
+            }
+            MeshRenderer? renderer = _fallbackRoot.GetComponent<MeshRenderer>();
+            Plugin.Logger.LogInfo("[GoblinTimer] Visible HUD diagnostic: " +
+                "viewport=(" + projected.x.ToString("0.00") + ", " +
+                projected.y.ToString("0.00") + ", " +
+                projected.z.ToString("0.00") + ") " +
+                "active=" + _fallbackRoot.activeInHierarchy +
+                " renderer=" + (renderer != null && renderer.enabled) +
+                " layer=" + _fallbackRoot.layer +
+                " text='" + _fallbackText?.text + "'.");
+            _loggedHudProjection = true;
+        }
+        catch (Exception ex)
+        {
+            Plugin.Logger.LogWarning("[GoblinTimer] HUD visibility diagnostic: " +
+                ex.GetType().Name + ": " + ex.Message);
+            _loggedHudProjection = true;
+        }
+    }
+
+    private void FindLevelTextMesh()
+    {
+        try
+        {
+            foreach (TextMesh candidate in Resources.FindObjectsOfTypeAll<TextMesh>())
+            {
+                if (candidate == null || !candidate.gameObject.activeInHierarchy ||
+                    candidate.gameObject.layer != TopUiLayer)
+                    continue;
+                string label = (candidate.text ?? "").Trim();
+                if (!label.StartsWith("Level ", StringComparison.OrdinalIgnoreCase))
+                    continue;
+                string number = label.Substring(6).Trim();
+                if (number.Length == 0 || number.Length > 4 ||
+                    !int.TryParse(number, out _))
+                    continue;
+                if (!IsUnderLocalRig(candidate.transform) ||
+                    candidate.transform.parent == null)
+                    continue;
+
+                Transform parent = candidate.transform.parent;
+                if (_meshRoot != null) UnityEngine.Object.Destroy(_meshRoot);
+                _meshRoot = new GameObject("OrbusGoblinTimer.NextToNativeLevelTextMesh");
+                _meshRoot.layer = TopUiLayer;
+                _meshRoot.transform.SetParent(parent, false);
+                _meshRoot.transform.localPosition =
+                    candidate.transform.localPosition +
+                    new Vector3(Mathf.Max(0.14f,
+                        candidate.characterSize * label.Length * 0.7f + 0.07f),
+                        0f, 0f);
+                _meshRoot.transform.localRotation = candidate.transform.localRotation;
+                _meshRoot.transform.localScale = candidate.transform.localScale;
+                _meshText = _meshRoot.AddComponent<TextMesh>();
+                _meshText.font = candidate.font;
+                _meshText.fontSize = Mathf.Max(24, candidate.fontSize);
+                _meshText.characterSize = Mathf.Max(0.025f, candidate.characterSize);
+                _meshText.fontStyle = FontStyle.Bold;
+                _meshText.anchor = TextAnchor.MiddleLeft;
+                _meshText.alignment = TextAlignment.Left;
+                _meshText.color = new Color(1f, 0.93f, 0.71f, 1f);
+                _meshText.text = BuildDisplayText();
+                MeshRenderer? renderer = _meshRoot.GetComponent<MeshRenderer>();
+                if (renderer != null && _meshText.font != null)
+                    renderer.material = _meshText.font.material;
+                _meshLevelAnchor = candidate;
+                _loggedMissingLevelMesh = false;
+                Plugin.Logger.LogInfo("[GoblinTimer] Found 'Level NN' TextMesh on native UI layer. " +
+                    "Using local-rig sibling beside " + candidate.transform.name +
+                    "; font size=" + _meshText.fontSize + " characterSize=" +
+                    _meshText.characterSize.ToString("0.000") + ".");
+                return;
+            }
+            if (!_loggedMissingLevelMesh)
+            {
+                _loggedMissingLevelMesh = true;
+                Plugin.Logger.LogInfo("[GoblinTimer] No level-number TextMesh on player UI layer; " +
+                    "independent fallback will remain visible.");
+            }
+        }
+        catch (Exception ex)
+        {
+            Plugin.Logger.LogWarning("[GoblinTimer] Level TextMesh search failed: " +
+                ex.GetType().Name + ": " + ex.Message);
         }
     }
 
@@ -269,6 +402,8 @@ public sealed class GoblinHud : MonoBehaviour
         }
     }
 
+#endif
+
     private static bool IsUnderLocalRig(Transform transform)
     {
         Transform? current = transform;
@@ -280,7 +415,6 @@ public sealed class GoblinHud : MonoBehaviour
         }
         return false;
     }
-#endif
 
     // Win32 is used for the manual PC keyboard fallback, as in the already
     // working RebornCam shortcuts. No Unity InputLegacyModule dependency.
@@ -307,6 +441,7 @@ public sealed class GoblinHud : MonoBehaviour
 #if ORBUS_UI_AVAILABLE
         if (_nativeRoot != null) UnityEngine.Object.Destroy(_nativeRoot);
 #endif
+        if (_meshRoot != null) UnityEngine.Object.Destroy(_meshRoot);
         if (_fallbackRoot != null) UnityEngine.Object.Destroy(_fallbackRoot);
     }
 }

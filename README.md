@@ -4,7 +4,7 @@ A lightweight client-side BepInEx IL2CPP plugin for OrbusVR **Community Edition*
 
 ## What works in this first build
 
-- Tries to discover the actual Unity UI **Level NN** label under the local player rig, then adds a matching-sized noninteractive sibling beside it. If the label is not discoverable, uses a **3.4x larger**, head-stable upper-left fallback attached to the game's stereo UI camera.
+- Tries to discover the actual Unity UI **Level NN** label under the local player rig, then adds a matching-sized noninteractive sibling beside it. If the label is not discoverable, uses a **~3x larger**, head-stable upper-left fallback attached to the game's stereo UI camera.
 - Uses the historical **four-hour** spawn interval. Source: [official 18 June 2019 patch notes](https://store.steampowered.com/news/posts/?appids=746930&enddate=1561494246).
 - Remembers the last confirmed spawn UTC time in the instance's BepInEx config. On future logins it extrapolates the repeating four-hour cycle.
 - Read-only PowerUI `set_innerHTML` observation on the original Community client and modern Spades client to detect English Trickster Goblin spawn announcements if they pass through those UI elements.
@@ -14,7 +14,7 @@ A lightweight client-side BepInEx IL2CPP plugin for OrbusVR **Community Edition*
 
 ## v0.1.2 readability and positioning
 
-The second headset test confirmed v0.1.1 loaded and attached correctly, but the TextMesh's font size/scale was too small to read. The desired placement is alongside the game's **Level XX** and weather HUD, not merely in the same UI rendering layer. v0.1.2 now searches for the real, visible Level label in Unity UI, creates a separate text element alongside it using a similar font and scale, and preserves the original game objects untouched. If no level label can be found, it uses a large, single-line TextMesh high on the left of the headset. Fallback font scale is 0.0058, up from 0.0017, and positioning is set once on parenting, never recomputed each update.
+The second headset test confirmed v0.1.1 loaded and attached correctly, but the TextMesh's font size/scale was too small to read. The desired placement is alongside the game's **Level XX** and weather HUD, not merely in the same UI rendering layer. v0.1.2 now searches for the real, visible Level label in Unity UI, creates a separate text element alongside it using a similar font and scale, and preserves the original game objects untouched. If no level label can be found, it uses a large, single-line TextMesh high on the left of the headset. Fallback font scale is 0.0048, up from 0.0017, and positioning is set once on parenting, never recomputed each update.
 
 Build against an RM instance with both UnityEngine.UI.dll and UnityEngine.UIModule.dll generated to enable native HUD integration. The compile remains compatible without those optional assemblies, but native-level matching is disabled and the camera fallback is used. Look for **"Found native Level HUD"**, **"Native 'Level NN' Unity UI label not found"**, or **"Native-level matching disabled"** in LogOutput.log to confirm what path was used.
 

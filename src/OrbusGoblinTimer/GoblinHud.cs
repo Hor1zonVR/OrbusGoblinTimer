@@ -16,7 +16,7 @@ public sealed class GoblinHud : MonoBehaviour
     public GoblinHud(IntPtr pointer) : base(pointer) { }
 
     private const int TopUiLayer = 23;
-    private static readonly Vector3 FallbackOffset = new(-0.59f, 0.55f, 1.08f);
+    private static readonly Vector3 FallbackOffset = new(-0.86f, 0.87f, 1.08f);
 
     private GameObject? _fallbackRoot;
     private TextMesh? _fallbackText;
@@ -41,10 +41,10 @@ public sealed class GoblinHud : MonoBehaviour
         _fallbackText = _fallbackRoot.AddComponent<TextMesh>();
         _fallbackText.anchor = TextAnchor.MiddleLeft;
         _fallbackText.alignment = TextAlignment.Left;
-        _fallbackText.fontSize = 48;
-        // v0.1.1 used 0.0017. This text is >3x its former visual scale,
+        _fallbackText.fontSize = 44;
+        // v0.1.1 used 0.0017. This text is about 3x its former visual scale,
         // and uses one concise line with no miniature subheading.
-        _fallbackText.characterSize = 0.0058f;
+        _fallbackText.characterSize = 0.0048f;
         _fallbackText.fontStyle = FontStyle.Bold;
         _fallbackText.color = new Color(1.0f, 0.92f, 0.72f, 1f);
         _fallbackText.text = "GOBLIN: SYNC NEEDED";
@@ -170,7 +170,7 @@ public sealed class GoblinHud : MonoBehaviour
                 _fallbackRoot.transform.localScale = Vector3.one;
                 _loggedMissingCamera = false;
                 Plugin.Logger.LogInfo("[GoblinTimer] Large camera HUD attached. " +
-                    "Fallback local offset=" + FallbackOffset + ", fontSize=48, characterSize=0.0058.");
+                    "Fallback local offset=" + FallbackOffset + ", fontSize=44, characterSize=0.0048.");
                 return;
             }
             _uiCamera = null;
@@ -227,7 +227,7 @@ public sealed class GoblinHud : MonoBehaviour
                 rect.localRotation = levelRect.localRotation;
                 rect.localScale = levelRect.localScale;
 
-                Text text = go.AddComponent<Text>();
+                // Avoid disturbing any native Horizontal/VerticalLayoutGroup parent.\n                var layoutElement = go.AddComponent<LayoutElement>();\n                layoutElement.ignoreLayout = true;\n\n                Text text = go.AddComponent<Text>();
                 text.font = candidate.font ?? Resources.GetBuiltinResource<Font>("Arial.ttf");
                 text.fontSize = Mathf.Max(24, candidate.fontSize);
                 text.fontStyle = FontStyle.Bold;

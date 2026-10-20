@@ -227,7 +227,11 @@ public sealed class GoblinHud : MonoBehaviour
                 rect.localRotation = levelRect.localRotation;
                 rect.localScale = levelRect.localScale;
 
-                // Avoid disturbing any native Horizontal/VerticalLayoutGroup parent.\n                var layoutElement = go.AddComponent<LayoutElement>();\n                layoutElement.ignoreLayout = true;\n\n                Text text = go.AddComponent<Text>();
+                // Avoid disturbing any native Horizontal/VerticalLayoutGroup parent.
+                var layoutElement = go.AddComponent<LayoutElement>();
+                layoutElement.ignoreLayout = true;
+
+                Text text = go.AddComponent<Text>();
                 text.font = candidate.font ?? Resources.GetBuiltinResource<Font>("Arial.ttf");
                 text.fontSize = Mathf.Max(24, candidate.fontSize);
                 text.fontStyle = FontStyle.Bold;

@@ -107,7 +107,7 @@ public sealed class GoblinHud : MonoBehaviour
         Transform cam = _headsetCamera.transform;
         Vector3 pos = cam.position + cam.forward * 0.78f + cam.up * 0.18f;
         _root.transform.position = pos;
-        _root.transform.rotation = Quaternion.LookRotation(pos - cam.position, cam.up);
+        _root.transform.rotation = Quaternion.LookRotation(cam.position - pos, cam.up);
         if (!_root.activeSelf) _root.SetActive(true);
     }
 

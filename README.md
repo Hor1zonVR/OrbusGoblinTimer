@@ -18,6 +18,37 @@ The current community servers have not been verified to use the original 2019 fo
 
 A UI hook observing chat/history might also replay an old notification. There is a 30-minute deduplication safeguard, but a live test is required before relying on auto-sync. No information about goblin positions is collected.
 
+## The easy workflow: local build -> GitHub Release -> RebornManager
+
+**No GitHub Actions secrets are required.** The source is on GitHub; `release.ps1` uses the generated BepInEx IL2CPP references already installed on your Windows PC to compile the DLL, publishes it through the GitHub CLI you already use, and RM then reads the public stable release. This works exactly like CastMetrics and QuestHelper.
+
+Clone from the parent of your existing QuestHelper directory:
+
+```powershell
+cd ..
+git clone https://github.com/Hor1zonVR/OrbusGoblinTimer.git
+cd .\OrbusGoblinTimer
+```
+
+Then publish directly to **RebornManager**:
+
+```powershell
+.\release.ps1
+```
+
+The script checks countdown tests, selects a BepInEx-prepared RM instance for local build references, compiles the plugin, commits/pushes any source changes, and publishes **one** `OrbusGoblinTimer.dll` on a **stable** GitHub release. If multiple game instances have generated interop references, choose the correct instance from its interactive list. Build references are read-only; no game folder is directly changed by the script.
+
+When you specifically want a **GitHub preview that RM intentionally ignores**, use `.\release.ps1 -Preview`. Because the user prefers testing directly through RM, the default is stable, though **v0.1.0 is still experimental** and needs in-game validation. After running the stable release, close Orbus and use RM's Add mods / Check updates to install the mod in the selected game instance.
+
+Subsequent updates from GitHub:
+
+```powershell
+git pull
+.\release.ps1
+```
+
+To choose a specific installed game manually, use `.\release.ps1 -GameDir 'C:\path\to\game-instance'`. You need `dotnet`, `git`, `gh`, and to be authenticated with `gh auth login` as with other local publishers.
+
 ## Build
 
 Install BepInEx IL2CPP in a separate MODTEST Orbus instance, launch it once to generate `BepInEx/interop`, close the game. In PowerShell, from the repo root:
@@ -40,12 +71,6 @@ Config (only if troubleshooting): `BepInEx/config/com.horizon.orbusgoblintimer.c
 
 ## CI / RebornManager releases
 
-`clock-tests.yml` runs pure timing and announcement-match tests without game files. `Publish GoblinTimer` builds the real DLL using existing private IL2CPP build references, initially publishes a **preview** (not shown in RM), and can promote that same commit/tag to **stable** after live testing.
+The lightweight `clock-tests.yml` GitHub Action validates clock math and announcement matching automatically without any secrets or private game files. The **actual IL2CPP plugin** is built on your own Windows PC with `release.ps1` and published using your existing GitHub CLI login. The RM catalogue already contains this repository; it offers the mod once its first non-prerelease `OrbusGoblinTimer.dll` is published.
 
-One-time Actions settings in this new repository:
-
-- **Variable** `GOBLINTIMER_BUILD_REFS_REPO` = the same private build-reference repository used by RebornCam/CastMetrics (owner/name).
-- **Secret** `GOBLINTIMER_BUILD_REFS_TOKEN` = read-only access token for that private repository.
-- Private release `refs-v1` should contain `RebornCamBuildRefs.zip` with BepInEx and interop references.
-
-Never commit generated game binaries, private refs or access tokens to this public repo. RM catalogue registration does not make an unreleased mod downloadable: after test builds pass, publish a verified **stable** DLL to enable install via RebornManager.
+Never commit your game's generated interop DLLs or authentication tokens to this public repository.

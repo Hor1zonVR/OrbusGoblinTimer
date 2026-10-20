@@ -7,7 +7,14 @@
     <AssemblyName>OrbusGoblinTimer</AssemblyName>
     <GameDir Condition="'$(GameDir)' == ''">$(LOCALAPPDATA)\OrbusRebornModdingInstances\Modded Orbus</GameDir>
   </PropertyGroup>
+  <!-- Match Orbus's actual level label if this game instance generated its UI interop.
+       Other editions still build using the much larger independent camera fallback. -->
+  <PropertyGroup Condition="Exists('$(GameDir)\\BepInEx\\interop\\UnityEngine.UI.dll') and Exists('$(GameDir)\\BepInEx\\interop\\UnityEngine.UIModule.dll')">
+    <DefineConstants>$(DefineConstants);ORBUS_UI_AVAILABLE</DefineConstants>
+  </PropertyGroup>
   <ItemGroup>
+    <Reference Include="UnityEngine.UI" Condition="Exists('$(GameDir)\\BepInEx\\interop\\UnityEngine.UI.dll')"><HintPath>$(GameDir)\\BepInEx\\interop\\UnityEngine.UI.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.UIModule" Condition="Exists('$(GameDir)\\BepInEx\\interop\\UnityEngine.UIModule.dll')"><HintPath>$(GameDir)\\BepInEx\\interop\\UnityEngine.UIModule.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="BepInEx.Core"><HintPath>$(GameDir)\BepInEx\core\BepInEx.Core.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="BepInEx.Unity.IL2CPP"><HintPath>$(GameDir)\BepInEx\core\BepInEx.Unity.IL2CPP.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="Il2CppInterop.Runtime"><HintPath>$(GameDir)\BepInEx\core\Il2CppInterop.Runtime.dll</HintPath><Private>false</Private></Reference>

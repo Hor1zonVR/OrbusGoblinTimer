@@ -1,22 +1,30 @@
-# OrbusGoblinTimer (v0.1.1 experimental)
+# OrbusGoblinTimer (v0.1.2 experimental)
 
-A lightweight client-side BepInEx IL2CPP plugin for OrbusVR **Community Edition** and **Spades/Renewed**. It shows a small **Trickster Goblin countdown in the same VR UI layer as Orbus's upper HUD**. No coordinates, tracking or gameplay modifications.
+A lightweight client-side BepInEx IL2CPP plugin for OrbusVR **Community Edition** and **Spades/Renewed**. It displays a **Trickster Goblin countdown next to the in-game Level number**, when that Unity UI label is available, or a significantly larger upper-left fallback when it is not. No coordinates, tracking or gameplay modifications.
 
 ## What works in this first build
 
-- Compact countdown anchored once to Orbus's **Camera (UI on Top)** (stereo UI camera, layer 23); no jittery per-frame text positioning.
+- Tries to discover the actual Unity UI **Level NN** label under the local player rig, then adds a matching-sized noninteractive sibling beside it. If the label is not discoverable, uses a **3.4x larger**, head-stable upper-left fallback attached to the game's stereo UI camera.
 - Uses the historical **four-hour** spawn interval. Source: [official 18 June 2019 patch notes](https://store.steampowered.com/news/posts/?appids=746930&enddate=1561494246).
 - Remembers the last confirmed spawn UTC time in the instance's BepInEx config. On future logins it extrapolates the repeating four-hour cycle.
 - Read-only PowerUI `set_innerHTML` observation on the original Community client and modern Spades client to detect English Trickster Goblin spawn announcements if they pass through those UI elements.
 - **Ctrl+Shift+F6 on the PC keyboard** manually records a goblin spawn *at the moment you press it*, if the automatic announcement hook cannot observe that client's notification path. This is a manual calibration fallback, **not** a magic lookup of the actual server time.
-- If no reliable first spawn has been observed, HUD displays `--:--:--` and `Waiting for spawn sync`, **not an invented timer**.
-- If last sync was more than 24 hours ago, the HUD explicitly labels the countdown as an **estimate** (server resets can change the schedule).
+- If no reliable first spawn has been observed, HUD displays **GOBLIN: SYNC NEEDED** in large readable text, **not an invented timer**.
+- If last sync was more than 24 hours ago, the readout appends **~** to indicate an estimated time (server restarts can change the schedule).
+
+## v0.1.2 readability and positioning
+
+The second headset test confirmed v0.1.1 loaded and attached correctly, but the TextMesh's font size/scale was too small to read. The desired placement is alongside the game's **Level XX** and weather HUD, not merely in the same UI rendering layer. v0.1.2 now searches for the real, visible Level label in Unity UI, creates a separate text element alongside it using a similar font and scale, and preserves the original game objects untouched. If no level label can be found, it uses a large, single-line TextMesh high on the left of the headset. Fallback font scale is 0.0058, up from 0.0017, and positioning is set once on parenting, never recomputed each update.
+
+Build against an RM instance with both UnityEngine.UI.dll and UnityEngine.UIModule.dll generated to enable native HUD integration. The compile remains compatible without those optional assemblies, but native-level matching is disabled and the camera fallback is used. Look for **"Found native Level HUD"**, **"Native 'Level NN' Unity UI label not found"**, or **"Native-level matching disabled"** in LogOutput.log to confirm what path was used.
+
+**Important:** The native level label may use a rendering system other than UnityEngine.UI.Text; this heuristic must be tested. If it doesn't match, upload a UI inspector report from RebornCam while in-game to identify the actual object and we can directly anchor the next iteration to it.
 
 ## v0.1.1 HUD fix
 
 The user's first live test on Spades confirmed the old headset-following TextMesh was backwards and jittery, and its unsynced state had no numeric countdown. The updated HUD uses a small one-line upper-HUD label with a smaller clear sync status. It is parented **once** to the native stereo `Camera (UI on Top)` whose layer-23 mask was verified in the user's RebornCam log. It does not change any of Orbus's original UI objects and does not touch the main VR rig. F9 was already assigned to RebornCam and is no longer a GoblinTimer shortcut.
 
-If no confirmed spawn timestamp is available, the mod shows `GOBLIN --:--:--` and `Waiting for sync`. This is intentional. The original four-hour interval alone cannot determine the phase of the community server's first spawn. Press **Ctrl+Shift+F6 only when the goblin has actually spawned** if announcement auto-sync isn't working. An unverified timer would be misleading.
+If no confirmed spawn timestamp is available, the mod shows `GOBLIN: SYNC NEEDED`. This is intentional. The original four-hour interval alone cannot determine the phase of the community server's first spawn. Press **Ctrl+Shift+F6 only when the goblin has actually spawned** if announcement auto-sync isn't working. An unverified timer would be misleading.
 
 ## Important limitations
 

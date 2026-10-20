@@ -7,7 +7,7 @@ using BepInEx.Unity.IL2CPP;
 
 namespace OrbusGoblinTimer;
 
-[BepInPlugin("com.horizon.orbusgoblintimer", "OrbusGoblinTimer", "0.1.0")]
+[BepInPlugin("com.horizon.orbusgoblintimer", "OrbusGoblinTimer", "0.1.1")]
 public sealed class Plugin : BasePlugin
 {
     internal static ManualLogSource Logger = null!;
@@ -24,14 +24,14 @@ public sealed class Plugin : BasePlugin
     {
         Logger = Log;
         Enabled = Config.Bind("General", "ShowTimer", true,
-            "Show the small VR headset-following Trickster Goblin countdown.");
+            "Show a small Trickster Goblin countdown next to the game's upper HUD.");
         SpawnIntervalHours = Config.Bind("Timing", "IntervalHours", 4,
             new ConfigDescription("Server goblin spawn interval; 4 hours in the original game.",
                 new AcceptableValueRange<int>(1, 24)));
         LastObservedSpawnUtc = Config.Bind("Timing", "LastObservedSpawnUtc", "",
             "Automatically saved time of the last observed spawn. Separate Orbus instances have separate configs.");
         SyncSource = Config.Bind("Timing", "LastSyncSource", "",
-            "Read-only note: announcement or manual-F9. The spawn interval is not itself the actual server schedule.");
+            "Read-only note: announcement or manual-CtrlShiftF6. The spawn interval is not itself the actual server schedule.");
         ObservePowerUiAnnouncements = Config.Bind("Diagnostics", "WatchPowerUiAnnouncements", true,
             "Observe original PowerUI HTML writes for Trickster Goblin spawn broadcasts (never changes game UI).");
 
@@ -39,11 +39,11 @@ public sealed class Plugin : BasePlugin
             Log.LogInfo("[GoblinTimer] Loaded last observation " + last.ToString("O") +
                         "; future cycles are estimates until confirmed on this server.");
         else
-            Log.LogInfo("[GoblinTimer] Waiting for first spawn announcement or manual F9 sync.");
+            Log.LogInfo("[GoblinTimer] Waiting for first spawn announcement or manual Ctrl+Shift+F6 sync.");
 
         if (ObservePowerUiAnnouncements.Value) AnnouncementObserver.Install();
         AddComponent<GoblinHud>();
-        Log.LogInfo("[GoblinTimer] v0.1.0 loaded; headset readout enabled=" + Enabled.Value +
+        Log.LogInfo("[GoblinTimer] v0.1.1 loaded; top UI readout enabled=" + Enabled.Value +
                     "; interval=" + SpawnIntervalHours.Value + " hours.");
     }
 

@@ -1,161 +1,242 @@
 using System;
-using System.Linq;
 using System.Reflection;
 using UnityEngine;
 
 namespace OrbusGoblinTimer;
 
-/// <summary>Local TextMesh only: follows the user's headset and never alters the world or other players.</summary>
+/// <summary>
+/// Small native-layer readout. Parents once to Orbus's own stereo UI-on-top
+/// camera, so Unity's VR rig does all head following at render rate.
+/// Never modifies the game's existing level, health, mission or menu UI.
+/// </summary>
 public sealed class GoblinHud : MonoBehaviour
 {
     public GoblinHud(IntPtr pointer) : base(pointer) { }
 
-    private GameObject? _root;
-    private TextMesh? _text;
-    private Camera? _headsetCamera;
-    private float _nextRefresh;
-    private float _nextCameraScan;
+    // The actual player UI camera renders ONLY layer 23 (0x00800000).
+    // Confirmed in Spades user's 2026-10-20 BepInEx/OrbusRebornCamera log.
+    private const int TopUiLayer = 23;
+    private static readonly Vector3 HudOffset = new(0.35f, 0.34f, 0.85f);
 
+    private GameObject? _root;
+    private TextMesh? _time;
+    private TextMesh? _status;
+    private Camera? _uiCamera;
+    private float _nextCameraSearch;
+    private float _nextTextUpdate;
+    private bool _warnedNoCamera;
+    private bool _manualInputWarned;
+
+    private static bool _inputResolved;
+    private static MethodInfo? _getKey;
     private static MethodInfo? _getKeyDown;
-    private static bool _searchedInput;
-    private static bool _loggedHotkey;
 
     private void Start()
     {
-        _root = new GameObject("OrbusGoblinTimer.LocalHeadsetHud");
+        _root = new GameObject("OrbusGoblinTimer.TopUi");
+        _root.layer = TopUiLayer;
         UnityEngine.Object.DontDestroyOnLoad(_root);
 
-        _text = _root.AddComponent<TextMesh>();
-        _text.anchor = TextAnchor.MiddleCenter;
-        _text.alignment = TextAlignment.Center;
-        _text.fontSize = 44;
-        _text.characterSize = 0.0032f;
-        _text.fontStyle = FontStyle.Bold;
-        _text.color = new Color(0.97f, 0.90f, 0.62f, 0.97f);
+        _time = MakeLabel("Countdown", 40, 0.0017f,
+            new Color(0.98f, 0.89f, 0.65f, 0.98f),
+            new Vector3(0f, 0f, 0f));
+
+        _status = MakeLabel("SyncStatus", 27, 0.00110f,
+            new Color(0.91f, 0.85f, 0.69f, 0.90f),
+            new Vector3(0f, -0.047f, 0f));
+
+        _root.SetActive(false);
+        Plugin.Logger.LogInfo("[GoblinTimer] Native-layer top HUD created; awaiting player's 'Camera (UI on Top)'.");
+    }
+
+    private TextMesh MakeLabel(string name, int fontSize, float characterSize,
+        Color color, Vector3 localPosition)
+    {
+        var child = new GameObject(name);
+        child.layer = TopUiLayer;
+        child.transform.SetParent(_root!.transform, false);
+        child.transform.localPosition = localPosition;
+        child.transform.localRotation = Quaternion.identity;
+
+        var mesh = child.AddComponent<TextMesh>();
+        mesh.anchor = TextAnchor.MiddleRight;
+        mesh.alignment = TextAlignment.Right;
+        mesh.fontSize = fontSize;
+        mesh.characterSize = characterSize;
+        mesh.fontStyle = FontStyle.Bold;
+        mesh.color = color;
+        mesh.text = "";
+
         try
         {
             Font? font = Resources.GetBuiltinResource<Font>("Arial.ttf");
             if (font != null)
             {
-                _text.font = font;
-                MeshRenderer? renderer = _root.GetComponent<MeshRenderer>();
+                mesh.font = font;
+                MeshRenderer? renderer = child.GetComponent<MeshRenderer>();
                 if (renderer != null) renderer.material = font.material;
             }
         }
         catch (Exception ex)
         {
-            Plugin.Logger.LogWarning("[GoblinTimer] HUD font fallback: " + ex.Message);
+            Plugin.Logger.LogWarning("[GoblinTimer] Built-in font fallback: " + ex.Message);
         }
-        _root.SetActive(false);
-        Plugin.Logger.LogInfo("[GoblinTimer] Local headset HUD created.");
+        return mesh;
     }
 
     private void Update()
     {
-        if (_root == null || _text == null) return;
-
-        if (WasF9Pressed())
+        // F9 belongs to RebornCam! The old GoblinTimer F9 shortcut
+        // caused conflicts. Require the more deliberate Ctrl+Shift+F6.
+        if (ManualSyncPressed())
         {
-            Plugin.OnObservedSpawn("manual-F9");
-            if (!_loggedHotkey)
-            {
-                Plugin.Logger.LogInfo("[GoblinTimer] F9 recorded confirmed spawn; future launches reuse this UTC observation.");
-                _loggedHotkey = true;
-            }
+            Plugin.OnObservedSpawn("manual-CtrlShiftF6");
+            Plugin.Logger.LogInfo("[GoblinTimer] Ctrl+Shift+F6 manual sync requested.");
         }
+    }
+
+    private void LateUpdate()
+    {
+        if (_root == null || _time == null || _status == null) return;
 
         if (!Plugin.Enabled.Value)
         {
-            _root.SetActive(false);
+            if (_root.activeSelf) _root.SetActive(false);
             return;
         }
 
-        float realtime = Time.realtimeSinceStartup;
-        if (realtime < _nextRefresh) return;
-        _nextRefresh = realtime + 0.2f;
+        float now = Time.realtimeSinceStartup;
 
-        if (_headsetCamera == null || !_headsetCamera.isActiveAndEnabled)
+        if (_uiCamera == null || !_uiCamera.isActiveAndEnabled ||
+            _root.transform.parent != _uiCamera.transform)
         {
-            if (realtime >= _nextCameraScan)
+            if (now >= _nextCameraSearch)
             {
-                _nextCameraScan = realtime + 2f;
-                _headsetCamera = ResolveCamera();
+                _nextCameraSearch = now + 2f;
+                FindAndAttachTopUiCamera();
             }
         }
-        if (_headsetCamera == null)
+
+        if (_uiCamera == null || !_uiCamera.isActiveAndEnabled ||
+            _root.transform.parent != _uiCamera.transform)
         {
-            _root.SetActive(false);
+            if (_root.activeSelf) _root.SetActive(false);
             return;
         }
 
-        DateTimeOffset now = DateTimeOffset.UtcNow;
-        string details = "Waiting for spawn sync";
-        string timeText = "--:--:--";
-        if (SpawnClock.TryParseUtc(Plugin.LastObservedSpawnUtc.Value, out DateTimeOffset last))
+        // Only change the string at ~1 Hz. The camera is a permanent parent;
+        // we NEVER compute a new headset-relative world pose in Update/LateUpdate.
+        if (now >= _nextTextUpdate)
         {
-            DateTimeOffset next = SpawnClock.NextSpawn(last, now, Plugin.SpawnIntervalHours.Value);
-            timeText = SpawnClock.FormatRemaining(next - now);
-            double elapsedHours = (now - last).TotalHours;
-            details = elapsedHours >= 24 ? "ESTIMATE - verify after server restart"
-                    : Plugin.HasSessionSync ? "Synced this session" : "From saved spawn time";
+            _nextTextUpdate = now + 0.5f;
+            RefreshText();
         }
-        else
-            details = "F9 on PC at confirmed spawn";
 
-        _text.text = "TRICKSTER GOBLIN\n" + timeText + "\n" + details;
-
-        Transform cam = _headsetCamera.transform;
-        Vector3 pos = cam.position + cam.forward * 0.78f + cam.up * 0.18f;
-        _root.transform.position = pos;
-        _root.transform.rotation = Quaternion.LookRotation(cam.position - pos, cam.up);
         if (!_root.activeSelf) _root.SetActive(true);
     }
 
-    private static Camera? ResolveCamera()
+    private void FindAndAttachTopUiCamera()
     {
         try
         {
-            // Prioritise stereo/HMD over RC's separate non-stereo recording camera.
-            foreach (Camera cam in Camera.allCameras)
+            foreach (Camera candidate in Camera.allCameras)
             {
-                if (cam != null && cam.isActiveAndEnabled && cam.stereoEnabled)
-                    return cam;
+                if (candidate == null || !candidate.isActiveAndEnabled ||
+                    !candidate.stereoEnabled) continue;
+
+                // The main eye camera and RC desktop recording cameras
+                // are deliberately NOT allowed as fallback anchors.
+                if (!string.Equals(candidate.name, "Camera (UI on Top)",
+                    StringComparison.Ordinal)) continue;
+
+                _uiCamera = candidate;
+                _root!.transform.SetParent(candidate.transform, false);
+                _root.transform.localPosition = HudOffset;
+                // Unity TextMesh glyph faces camera at local identity (-Z normal).
+                // No LookRotation/180-degree flip = no backwards text.
+                _root.transform.localRotation = Quaternion.identity;
+                _root.transform.localScale = Vector3.one;
+
+                _nextTextUpdate = 0f;
+                _warnedNoCamera = false;
+                Plugin.Logger.LogInfo("[GoblinTimer] Attached to " +
+                    candidate.transform.name + " (stereo UI camera, layer 23). " +
+                    "Fixed local pose; no per-frame positioning.");
+                return;
             }
-            Camera? main = Camera.main;
-            if (main != null && main.isActiveAndEnabled) return main;
+
+            _uiCamera = null;
+            if (!_warnedNoCamera)
+            {
+                _warnedNoCamera = true;
+                Plugin.Logger.LogWarning("[GoblinTimer] 'Camera (UI on Top)' not available yet. " +
+                    "HUD stays hidden rather than attaching to a wrong camera.");
+            }
         }
         catch (Exception ex)
         {
-            Plugin.Logger.LogDebug("[GoblinTimer] Camera lookup: " + ex.Message);
+            _uiCamera = null;
+            Plugin.Logger.LogWarning("[GoblinTimer] UI camera attach failed: " +
+                ex.GetType().Name + ": " + ex.Message);
         }
-        return null;
     }
 
-    private static bool WasF9Pressed()
+    private void RefreshText()
     {
-        if (!_searchedInput)
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        if (SpawnClock.TryParseUtc(Plugin.LastObservedSpawnUtc.Value,
+            out DateTimeOffset last))
         {
-            _searchedInput = true;
-            // Use reflection so the plugin does not require an additional
-            // InputLegacyModule reference in the shared Community/Spades build.
+            DateTimeOffset next = SpawnClock.NextSpawn(last, now,
+                Plugin.SpawnIntervalHours.Value);
+            _time!.text = "GOBLIN  " + SpawnClock.FormatRemaining(next - now);
+            _status!.text = (now - last >= TimeSpan.FromHours(24))
+                ? "Estimated - resync after server restart"
+                : Plugin.HasSessionSync ? "Synced this session - estimated next spawn"
+                                        : "Saved sync - estimated next spawn";
+        }
+        else
+        {
+            _time!.text = "GOBLIN  --:--:--";
+            _status!.text = "Waiting for sync - Ctrl+Shift+F6 at spawn";
+        }
+    }
+
+    private static bool ManualSyncPressed()
+    {
+        if (!_inputResolved)
+        {
+            _inputResolved = true;
             foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
             {
                 try
                 {
-                    Type? input = assembly.GetType("UnityEngine.Input", false);
-                    if (input == null) continue;
-                    _getKeyDown = input.GetMethod("GetKeyDown",
-                        BindingFlags.Public | BindingFlags.Static,
-                        null, new[] { typeof(string) }, null);
-                    if (_getKeyDown != null) break;
+                    Type? type = assembly.GetType("UnityEngine.Input", false);
+                    if (type == null) continue;
+                    _getKey = type.GetMethod("GetKey", BindingFlags.Public |
+                        BindingFlags.Static, null, new[] { typeof(string) }, null);
+                    _getKeyDown = type.GetMethod("GetKeyDown", BindingFlags.Public |
+                        BindingFlags.Static, null, new[] { typeof(string) }, null);
+                    if (_getKey != null && _getKeyDown != null) break;
                 }
                 catch { }
             }
         }
-        if (_getKeyDown == null) return false;
-        try { return _getKeyDown.Invoke(null, new object[] { "f9" }) is bool hit && hit; }
-        catch { return false; }
+        if (_getKey == null || _getKeyDown == null) return false;
+        try
+        {
+            bool ctrl = IsHeld("left ctrl") || IsHeld("right ctrl");
+            bool shift = IsHeld("left shift") || IsHeld("right shift");
+            return ctrl && shift && _getKeyDown.Invoke(null, new object[] { "f6" }) is bool hit && hit;
+        }
+        catch
+        {
+            return false;
+        }
     }
+
+    private static bool IsHeld(string key) =>
+        _getKey?.Invoke(null, new object[] { key }) is bool down && down;
 
     private void OnDestroy()
     {

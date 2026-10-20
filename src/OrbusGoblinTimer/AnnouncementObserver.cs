@@ -22,7 +22,7 @@ internal static class AnnouncementObserver
         if (element == null)
         {
             Plugin.Logger.LogWarning("[GoblinTimer] No known PowerUI element type; " +
-                "automatic announcement detection is unavailable. Use F9 at a confirmed spawn.");
+                "automatic announcement detection is unavailable. Use Ctrl+Shift+F6 at a confirmed spawn.");
             return;
         }
 
@@ -38,7 +38,7 @@ internal static class AnnouncementObserver
         if (setter == null || before == null)
         {
             Plugin.Logger.LogWarning("[GoblinTimer] PowerUI HTML setter signature not found. " +
-                "Use F9 to synchronise from an observed spawn.");
+                "Use Ctrl+Shift+F6 to synchronise from an observed spawn.");
             return;
         }
 
@@ -52,7 +52,7 @@ internal static class AnnouncementObserver
         catch (Exception ex)
         {
             Plugin.Logger.LogWarning("[GoblinTimer] Announcement probe unavailable: " +
-                ex.GetType().Name + " " + ex.Message + ". F9 sync remains available.");
+                ex.GetType().Name + " " + ex.Message + ". Ctrl+Shift+F6 sync remains available.");
         }
     }
 

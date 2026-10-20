@@ -1,16 +1,22 @@
-# OrbusGoblinTimer (v0.1.0 experimental)
+# OrbusGoblinTimer (v0.1.1 experimental)
 
-A lightweight client-side BepInEx IL2CPP plugin for OrbusVR **Community Edition** and **Spades/Renewed**. It shows a small **Trickster Goblin countdown above the centre of your VR view**. No coordinates, tracking or gameplay modifications.
+A lightweight client-side BepInEx IL2CPP plugin for OrbusVR **Community Edition** and **Spades/Renewed**. It shows a small **Trickster Goblin countdown in the same VR UI layer as Orbus's upper HUD**. No coordinates, tracking or gameplay modifications.
 
 ## What works in this first build
 
-- Headset-following local **TextMesh** HUD, with a live HH:MM:SS countdown.
+- Compact countdown anchored once to Orbus's **Camera (UI on Top)** (stereo UI camera, layer 23); no jittery per-frame text positioning.
 - Uses the historical **four-hour** spawn interval. Source: [official 18 June 2019 patch notes](https://store.steampowered.com/news/posts/?appids=746930&enddate=1561494246).
 - Remembers the last confirmed spawn UTC time in the instance's BepInEx config. On future logins it extrapolates the repeating four-hour cycle.
 - Read-only PowerUI `set_innerHTML` observation on the original Community client and modern Spades client to detect English Trickster Goblin spawn announcements if they pass through those UI elements.
-- **F9 on the PC keyboard** manually records a goblin spawn *at the moment you press it*, if the automatic announcement hook cannot observe that client's notification path. This is a manual calibration fallback, **not** a magic lookup of the actual server time.
+- ****Ctrl+Shift+F6 on the PC keyboard**** manually records a goblin spawn *at the moment you press it*, if the automatic announcement hook cannot observe that client's notification path. This is a manual calibration fallback, **not** a magic lookup of the actual server time.
 - If no reliable first spawn has been observed, HUD displays `--:--:--` and `Waiting for spawn sync`, **not an invented timer**.
 - If last sync was more than 24 hours ago, the HUD explicitly labels the countdown as an **estimate** (server resets can change the schedule).
+
+## v0.1.1 HUD fix
+
+The user's first live test on Spades confirmed the old headset-following TextMesh was backwards and jittery, and its unsynced state had no numeric countdown. The updated HUD uses a small one-line upper-HUD label with a smaller clear sync status. It is parented **once** to the native stereo `Camera (UI on Top)` whose layer-23 mask was verified in the user's RebornCam log. It does not change any of Orbus's original UI objects and does not touch the main VR rig. F9 was already assigned to RebornCam and is no longer a GoblinTimer shortcut.
+
+If no confirmed spawn timestamp is available, the mod shows `GOBLIN --:--:--` and `Waiting for sync`. This is intentional. The original four-hour interval alone cannot determine the phase of the community server's first spawn. Press **Ctrl+Shift+F6 only when the goblin has actually spawned** if announcement auto-sync isn't working. An unverified timer would be misleading.
 
 ## Important limitations
 
@@ -62,8 +68,8 @@ Adjust the GameDir to the correct instance. Install `src/OrbusGoblinTimer/bin/Re
 ## Testing
 
 1. Launch each edition and confirm the HUD says `Waiting for spawn sync`.
-2. At a **confirmed** spawn, see whether `[GoblinTimer] Spawn clock synced from announcement` appears. If not, press **F9** on the desktop keyboard while Orbus is focused.
-3. Confirm a countdown appears near the top of the headset view and advances each second.
+2. At a **confirmed** spawn, see whether `[GoblinTimer] Spawn clock synced from announcement` appears. If not, press ****Ctrl+Shift+F6**** on the desktop keyboard while Orbus is focused.
+3. Confirm the timer appears near the top HUD/level region, faces the player, and doesn't jitter when your head moves. The number should change each second only after a real sync.
 4. Exit and relaunch the **same instance**: the saved countdown should resume. Confirm any mismatch after a live spawn, or server restart, rather than assuming the interval.
 5. Share any relevant `[GoblinTimer]` log lines and whether the announcement was detected on Community or Spades.
 

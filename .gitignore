@@ -1,0 +1,7 @@
+.build-refs/
+**/bin/
+**/obj/
+*.user
+.vs/
+*.dll
+*.pdb

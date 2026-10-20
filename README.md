@@ -1,3 +1,13 @@
+# OrbusGoblinTimer (v0.1.5 diagnostic)
+
+**v0.1.5: read-only Goblin event diagnostics.** The confirmed native TopHUD overlay remains in place, nudged slightly right to avoid the Level label. The game-code scan runs **only** when you press **Ctrl+Shift+G** with the game focused; it scans loaded `Assembly-CSharp` type names once per session, caps the result list at 45, and records matching method **names**, not player data, positions or network packets. Startup also probes known PowerUI/Dom text setters and logs only text containing `goblin` or `trickster`. Automatic timer sync is still experimental: **do not assume a correct spawn countdown before a real announcement has been detected**.
+
+**Test via RebornManager:** from the existing OrbusGoblinTimer clone, run `git pull` then `.\release.ps1`; refresh RM and update the mod. In-game, press **Ctrl+Shift+G once** and send `BepInEx/LogOutput.log` with lines containing `[GoblinTimer] DIAG`. Keep the mod running when an actual goblin spawn announcement happens and send that session's log too. **Ctrl+Shift+F6** still manually syncs a confirmed actual spawn; do not use it just to test the UI. If a message may contain private chat, review the log before sharing.
+
+**Safety:** no polling/periodic game-object searches were added to the diagnostic code, no hooks alter content, and the one-shot type survey is deliberately opt-in. This is an untested source change until the DLL is built and launched in both Community and Spades editions.
+
+---
+
 # OrbusGoblinTimer (v0.1.4 experimental)
 
 Client-side BepInEx IL2CPP Trickster Goblin countdown for OrbusVR Community and Spades / Renewed. **v0.1.4 replaces the old headset-following TextMesh with a noninteractive Unity UI.Text child of the game's own `PlayerRigv4/TopHUD/Canvas`.** Nothing is parented to a camera. The label should occupy the same world-space HUD that shows level/health/weather, and leave the view naturally when looking down.

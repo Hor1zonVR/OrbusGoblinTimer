@@ -7,7 +7,7 @@ using BepInEx.Unity.IL2CPP;
 
 namespace OrbusGoblinTimer;
 
-[BepInPlugin("com.horizon.orbusgoblintimer", "OrbusGoblinTimer", "0.1.3")]
+[BepInPlugin("com.horizon.orbusgoblintimer", "OrbusGoblinTimer", "0.1.4")]
 public sealed class Plugin : BasePlugin
 {
     internal static ManualLogSource Logger = null!;
@@ -24,7 +24,7 @@ public sealed class Plugin : BasePlugin
     {
         Logger = Log;
         Enabled = Config.Bind("General", "ShowTimer", true,
-            "Show a small Trickster Goblin countdown next to the game's upper HUD.");
+            "Show a compact Trickster Goblin countdown in Orbus's native TopHUD Canvas.");
         SpawnIntervalHours = Config.Bind("Timing", "IntervalHours", 4,
             new ConfigDescription("Server goblin spawn interval; 4 hours in the original game.",
                 new AcceptableValueRange<int>(1, 24)));
@@ -43,7 +43,7 @@ public sealed class Plugin : BasePlugin
 
         if (ObservePowerUiAnnouncements.Value) AnnouncementObserver.Install();
         AddComponent<GoblinHud>();
-        Log.LogInfo("[GoblinTimer] v0.1.3 loaded; top UI readout enabled=" + Enabled.Value +
+        Log.LogInfo("[GoblinTimer] v0.1.4 loaded; top UI readout enabled=" + Enabled.Value +
                     "; interval=" + SpawnIntervalHours.Value + " hours.");
     }
 

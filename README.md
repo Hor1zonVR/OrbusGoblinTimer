@@ -1,16 +1,19 @@
-# OrbusGoblinTimer (v0.1.3 experimental)
+# OrbusGoblinTimer (v0.1.4 experimental)
 
-A lightweight client-side BepInEx IL2CPP plugin for OrbusVR **Community Edition** and **Spades/Renewed**. It displays a **Trickster Goblin countdown next to the in-game Level number**, when that Unity UI label is available, or a significantly larger upper-left fallback when it is not. No coordinates, tracking or gameplay modifications.
+Client-side BepInEx IL2CPP Trickster Goblin countdown for OrbusVR Community and Spades / Renewed. **v0.1.4 replaces the old headset-following TextMesh with a noninteractive Unity UI.Text child of the game's own `PlayerRigv4/TopHUD/Canvas`.** Nothing is parented to a camera. The label should occupy the same world-space HUD that shows level/health/weather, and leave the view naturally when looking down.
 
-## What works in this first build
+## What to expect from v0.1.4
 
-- Tries to discover the actual Unity UI **Level NN** label under the local player rig, then adds a matching-sized noninteractive sibling beside it. If the label is not discoverable, uses a **~3x larger**, head-stable upper-left fallback attached to the game's stereo UI camera.
-- Uses the historical **four-hour** spawn interval. Source: [official 18 June 2019 patch notes](https://store.steampowered.com/news/posts/?appids=746930&enddate=1561494246).
-- Remembers the last confirmed spawn UTC time in the instance's BepInEx config. On future logins it extrapolates the repeating four-hour cycle.
-- Read-only PowerUI `set_innerHTML` observation on the original Community client and modern Spades client to detect English Trickster Goblin spawn announcements if they pass through those UI elements.
-- **Ctrl+Shift+F6 on the PC keyboard** manually records a goblin spawn *at the moment you press it*, if the automatic announcement hook cannot observe that client's notification path. This is a manual calibration fallback, **not** a magic lookup of the actual server time.
-- If no reliable first spawn has been observed, HUD displays **GOBLIN: SYNC NEEDED** in large readable text, **not an invented timer**.
-- If last sync was more than 24 hours ago, the readout appends **~** to indicate an estimated time (server restarts can change the schedule).
+- The RebornCam read-only UI report `OrbusUI_20261020_132901_862.txt` verified an active world-space `PlayerRigv4/TopHUD/Canvas` (layer 5: UI; RectTransform 1x1). This is the actual native TopHUD container, although the old inspector's highest-score cutoff omitted most children.
+- The mod adds a compact `Goblin: no sync` display *inside that native Canvas*, using its actual RectTransform size, and does not manipulate its existing children, player rig, cameras, or gameplay state.
+- If no native TopHUD is available, the label remains hidden: **the oversized floating fallback is removed entirely**.
+- `Ctrl+Shift+F6` on PC still records an actual observed spawn time. The four-hour interval is a historical estimate; without a confirmed spawn, the mod intentionally shows no invented countdown. The PowerUI announcement listener remains experimental.
+- The BepInEx log now prints `ATTACHED to native PlayerRigv4/TopHUD/Canvas` and a brief read-only inventory of the native HUD's children. If the alignment is slightly off, send this log and a screenshot. We can then use the real child names and scale instead of guessing from camera offsets.
+- The build requires UnityEngine.UI interop for native HUD rendering; the existing local release script enables this automatically when the selected Orbus RM instance contains it.
+
+## Why this was changed
+
+The prior versions were anchored to `Camera (UI on Top)`, which rotates with the headset and is **not** the user-requested display. Increasing its text size to 0.065 world units made it enormous. The user instead requested the top in-game status HUD that stays at its game position as they turn or look down. The 13:29 RebornCam report discovered the native `TopHUD/Canvas` and enables direct parent placement.
 
 ## v0.1.3 invisible HUD diagnosis and visibility fix
 

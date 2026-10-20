@@ -1,4 +1,5 @@
 using System;
+using System.Runtime.InteropServices;
 using UnityEngine;
 #if ORBUS_UI_AVAILABLE
 using UnityEngine.UI;
@@ -7,441 +8,297 @@ using UnityEngine.UI;
 namespace OrbusGoblinTimer;
 
 /// <summary>
-/// Read-only discovery of Orbus's local level HUD, and an independent goblin
-/// readout placed beside it. Never reparents or edits Orbus's original UI.
-/// Falls back to a larger static overlay on the stereo "UI on Top" camera.
+/// Integrates a small, non-interactive label into the actual Orbus TopHUD
+/// world-space Canvas. Nothing is attached to either of the eye cameras.
 /// </summary>
 public sealed class GoblinHud : MonoBehaviour
 {
     public GoblinHud(IntPtr pointer) : base(pointer) { }
 
-    private const int TopUiLayer = 23;
-    private static readonly Vector3 FallbackOffset = new(-0.50f, 0.46f, 1.25f);
-
-    private GameObject? _fallbackRoot;
-    private TextMesh? _fallbackText;
-    private Camera? _uiCamera;
-    private float _nextCameraSearch;
-    private float _nextLevelSearch;
-    private float _nextTextUpdate;
-    private bool _loggedMissingCamera;
-    private bool _loggedMissingLevel;
-    private bool _loggedHudProjection;
-    private bool _loggedMissingLevelMesh;
-    private float _nextMeshSearch;
-    private GameObject? _meshRoot;
-    private TextMesh? _meshText;
-    private TextMesh? _meshLevelAnchor;
 #if ORBUS_UI_AVAILABLE
-    private GameObject? _nativeRoot;
-    private Text? _nativeText;
-    private Text? _levelAnchor;
+    private Canvas? _hudCanvas;
+    private GameObject? _entry;
+    private Text? _label;
+    private float _nextSearch;
+    private float _nextRefresh;
+    private bool _warnedNoHud;
+    private bool _loggedHierarchy;
+#else
+    private bool _warnedNoInterop;
 #endif
+    private bool _chordWasDown;
 
     private void Start()
     {
-        _fallbackRoot = new GameObject("OrbusGoblinTimer.UpperLeftFallback");
-        _fallbackRoot.layer = TopUiLayer;
-        UnityEngine.Object.DontDestroyOnLoad(_fallbackRoot);
-
-        _fallbackText = _fallbackRoot.AddComponent<TextMesh>();
-        _fallbackText.anchor = TextAnchor.MiddleLeft;
-        _fallbackText.alignment = TextAlignment.Left;
-        _fallbackText.fontSize = 48;
-        // TextMesh characterSize uses world units; previous 0.0048m was
-        // practically illegible in VR. 0.065m gives a visibly sized glyph at 1.25m.
-        _fallbackText.characterSize = 0.065f;
-        _fallbackText.fontStyle = FontStyle.Bold;
-        _fallbackText.color = new Color(1.0f, 0.92f, 0.72f, 1f);
-        _fallbackText.text = "GOBLIN: NO SYNC";
-        try
-        {
-            Font? font = Resources.GetBuiltinResource<Font>("Arial.ttf");
-            if (font != null)
-            {
-                _fallbackText.font = font;
-                MeshRenderer? renderer = _fallbackRoot.GetComponent<MeshRenderer>();
-                if (renderer != null) renderer.material = font.material;
-            }
-        }
-        catch (Exception ex)
-        {
-            Plugin.Logger.LogWarning("[GoblinTimer] Fallback font: " + ex.Message);
-        }
-        _fallbackRoot.SetActive(false);
-        Plugin.Logger.LogInfo("[GoblinTimer] v0.1.3: real Level HUD search plus readable, in-view fallback.");
-#if !ORBUS_UI_AVAILABLE
-        Plugin.Logger.LogWarning("[GoblinTimer] Unity UI interop not available in build references. " +
-            "Native Level-label matching disabled; readable camera fallback will be used.");
-#endif
+        Plugin.Logger.LogInfo("[GoblinTimer] v0.1.4: native PlayerRigv4/TopHUD/Canvas ONLY. " +
+            "No headset-following fallback.");
     }
 
     private void Update()
     {
         if (ManualSyncPressed())
+        {
             Plugin.OnObservedSpawn("manual-CtrlShiftF6");
+            Plugin.Logger.LogInfo("[GoblinTimer] Ctrl+Shift+F6 manual spawn sync requested.");
+        }
     }
 
     private void LateUpdate()
     {
-        if (_fallbackRoot == null || _fallbackText == null) return;
+#if ORBUS_UI_AVAILABLE
         if (!Plugin.Enabled.Value)
         {
-            if (_fallbackRoot.activeSelf) _fallbackRoot.SetActive(false);
-            if (_meshRoot != null && _meshRoot.activeSelf) _meshRoot.SetActive(false);
-#if ORBUS_UI_AVAILABLE
-            if (_nativeRoot != null && _nativeRoot.activeSelf) _nativeRoot.SetActive(false);
-#endif
+            if (_entry != null && _entry.activeSelf) _entry.SetActive(false);
             return;
         }
 
         float now = Time.realtimeSinceStartup;
-        if (_uiCamera == null || !_uiCamera.isActiveAndEnabled ||
-            _fallbackRoot.transform.parent != _uiCamera.transform)
+        if (_hudCanvas == null || !_hudCanvas.gameObject.activeInHierarchy ||
+            _entry == null || _label == null ||
+            _entry.transform.parent != _hudCanvas.transform)
         {
-            if (now >= _nextCameraSearch)
+            if (now >= _nextSearch)
             {
-                _nextCameraSearch = now + 2f;
-                AttachToTopCamera();
+                _nextSearch = now + 2f;
+                AttachToNativeTopHud();
             }
-        }
-
-#if ORBUS_UI_AVAILABLE
-        if (now >= _nextLevelSearch)
-        {
-            _nextLevelSearch = now + 4f;
-            if (_levelAnchor == null || !_levelAnchor.gameObject.activeInHierarchy ||
-                _nativeText == null || _nativeRoot == null)
-                FindNativeLevelLabel();
-        }
-#endif
-
-        if (now >= _nextMeshSearch)
-        {
-            _nextMeshSearch = now + 4f;
-            if (_meshLevelAnchor == null || !_meshLevelAnchor.gameObject.activeInHierarchy ||
-                _meshText == null || _meshRoot == null)
-                FindLevelTextMesh();
-        }
-
-        if (now >= _nextTextUpdate)
-        {
-            _nextTextUpdate = now + 0.65f;
-            string status = BuildDisplayText();
-            _fallbackText.text = status;
-            if (_meshText != null) _meshText.text = status;
-#if ORBUS_UI_AVAILABLE
-            if (_nativeText != null) _nativeText.text = status;
-#endif
-        }
-
-#if ORBUS_UI_AVAILABLE
-        // A native sibling inherits the same Canvas, anchoring and scaling as
-        // "Level 25", and takes priority whenever it is available.
-        bool nativeVisible = _nativeText != null && _nativeRoot != null &&
-            _levelAnchor != null && _levelAnchor.gameObject.activeInHierarchy &&
-            _nativeRoot.transform.parent == _levelAnchor.transform.parent;
-        if (_nativeRoot != null && _nativeRoot.activeSelf != nativeVisible)
-            _nativeRoot.SetActive(nativeVisible);
-        if (nativeVisible)
-        {
-            if (_fallbackRoot.activeSelf) _fallbackRoot.SetActive(false);
             return;
         }
+
+        if (!_entry.activeSelf) _entry.SetActive(true);
+        if (now >= _nextRefresh)
+        {
+            _nextRefresh = now + 0.5f;
+            _label.text = DisplayText();
+        }
+#else
+        if (!_warnedNoInterop)
+        {
+            _warnedNoInterop = true;
+            Plugin.Logger.LogWarning("[GoblinTimer] No UnityEngine.UI interop references in " +
+                "this build. Cannot use native TopHUD; floating display intentionally disabled.");
+        }
 #endif
-        // A native TextMesh beside the actual level takes priority over our
-        // independent camera-space fallback, but never hides the original HUD.
-        bool meshVisible = _meshText != null && _meshRoot != null &&
-            _meshLevelAnchor != null && _meshLevelAnchor.gameObject.activeInHierarchy &&
-            _meshRoot.transform.parent == _meshLevelAnchor.transform.parent;
-        if (_meshRoot != null && _meshRoot.activeSelf != meshVisible)
-            _meshRoot.SetActive(meshVisible);
-        bool fallbackVisible = !meshVisible &&
-            _uiCamera != null && _uiCamera.isActiveAndEnabled &&
-            _fallbackRoot.transform.parent == _uiCamera.transform;
-        if (_fallbackRoot.activeSelf != fallbackVisible)
-            _fallbackRoot.SetActive(fallbackVisible);
-        if (fallbackVisible && !_loggedHudProjection)
-            LogFallbackProjection();
     }
 
-    private static string BuildDisplayText()
+    private static string DisplayText()
     {
         DateTimeOffset now = DateTimeOffset.UtcNow;
         if (!SpawnClock.TryParseUtc(Plugin.LastObservedSpawnUtc.Value,
             out DateTimeOffset last))
-            return "GOBLIN: NO SYNC";
+            return "Goblin: no sync";
 
         DateTimeOffset next = SpawnClock.NextSpawn(last, now,
             Plugin.SpawnIntervalHours.Value);
-        string stale = (now - last >= TimeSpan.FromHours(24)) ? " ~" : "";
-        return "GOBLIN: " + SpawnClock.FormatRemaining(next - now) + stale;
-    }
-
-    private void AttachToTopCamera()
-    {
-        try
-        {
-            foreach (Camera camera in Camera.allCameras)
-            {
-                if (camera == null || !camera.isActiveAndEnabled ||
-                    !camera.stereoEnabled ||
-                    !string.Equals(camera.name, "Camera (UI on Top)",
-                        StringComparison.Ordinal)) continue;
-
-                _uiCamera = camera;
-                _loggedHudProjection = false;
-                _fallbackRoot!.transform.SetParent(camera.transform, false);
-                _fallbackRoot.transform.localPosition = FallbackOffset;
-                _fallbackRoot.transform.localRotation = Quaternion.identity;
-                _fallbackRoot.transform.localScale = Vector3.one;
-                _loggedMissingCamera = false;
-                Plugin.Logger.LogInfo("[GoblinTimer] Large camera HUD attached. " +
-                    "Fallback local offset=" + FallbackOffset + ", fontSize=48, characterSize=0.065.");
-                return;
-            }
-            _uiCamera = null;
-            if (!_loggedMissingCamera)
-            {
-                _loggedMissingCamera = true;
-                Plugin.Logger.LogWarning("[GoblinTimer] Waiting for active stereo Camera (UI on Top).");
-            }
-        }
-        catch (Exception ex)
-        {
-            Plugin.Logger.LogWarning("[GoblinTimer] Top camera lookup failed: " + ex.Message);
-        }
-    }
-
-
-    private void LogFallbackProjection()
-    {
-        if (_uiCamera == null || _fallbackRoot == null) return;
-        try
-        {
-            Vector3 projected = _uiCamera.WorldToViewportPoint(
-                _fallbackRoot.transform.position);
-            bool inView = projected.z > _uiCamera.nearClipPlane &&
-                          projected.x > 0.05f && projected.x < 0.90f &&
-                          projected.y > 0.08f && projected.y < 0.92f;
-            if (!inView)
-            {
-                // Never leave the readout at the edge of the VR frustum.
-                _fallbackRoot.transform.localPosition =
-                    new Vector3(-0.22f, 0.28f, 1.25f);
-                projected = _uiCamera.WorldToViewportPoint(
-                    _fallbackRoot.transform.position);
-                Plugin.Logger.LogWarning("[GoblinTimer] HUD position was out of view; " +
-                    "moved to safe upper-center-left location.");
-            }
-            MeshRenderer? renderer = _fallbackRoot.GetComponent<MeshRenderer>();
-            Plugin.Logger.LogInfo("[GoblinTimer] Visible HUD diagnostic: " +
-                "viewport=(" + projected.x.ToString("0.00") + ", " +
-                projected.y.ToString("0.00") + ", " +
-                projected.z.ToString("0.00") + ") " +
-                "active=" + _fallbackRoot.activeInHierarchy +
-                " renderer=" + (renderer != null && renderer.enabled) +
-                " layer=" + _fallbackRoot.layer +
-                " text='" + _fallbackText?.text + "'.");
-            _loggedHudProjection = true;
-        }
-        catch (Exception ex)
-        {
-            Plugin.Logger.LogWarning("[GoblinTimer] HUD visibility diagnostic: " +
-                ex.GetType().Name + ": " + ex.Message);
-            _loggedHudProjection = true;
-        }
-    }
-
-    private void FindLevelTextMesh()
-    {
-        try
-        {
-            foreach (TextMesh candidate in Resources.FindObjectsOfTypeAll<TextMesh>())
-            {
-                if (candidate == null || !candidate.gameObject.activeInHierarchy ||
-                    candidate.gameObject.layer != TopUiLayer)
-                    continue;
-                string label = (candidate.text ?? "").Trim();
-                if (!label.StartsWith("Level ", StringComparison.OrdinalIgnoreCase))
-                    continue;
-                string number = label.Substring(6).Trim();
-                if (number.Length == 0 || number.Length > 4 ||
-                    !int.TryParse(number, out _))
-                    continue;
-                if (!IsUnderLocalRig(candidate.transform) ||
-                    candidate.transform.parent == null)
-                    continue;
-
-                Transform parent = candidate.transform.parent;
-                if (_meshRoot != null) UnityEngine.Object.Destroy(_meshRoot);
-                _meshRoot = new GameObject("OrbusGoblinTimer.NextToNativeLevelTextMesh");
-                _meshRoot.layer = TopUiLayer;
-                _meshRoot.transform.SetParent(parent, false);
-                _meshRoot.transform.localPosition =
-                    candidate.transform.localPosition +
-                    new Vector3(Mathf.Max(0.14f,
-                        candidate.characterSize * label.Length * 0.7f + 0.07f),
-                        0f, 0f);
-                _meshRoot.transform.localRotation = candidate.transform.localRotation;
-                _meshRoot.transform.localScale = candidate.transform.localScale;
-                _meshText = _meshRoot.AddComponent<TextMesh>();
-                _meshText.font = candidate.font;
-                _meshText.fontSize = Mathf.Max(24, candidate.fontSize);
-                _meshText.characterSize = Mathf.Max(0.025f, candidate.characterSize);
-                _meshText.fontStyle = FontStyle.Bold;
-                _meshText.anchor = TextAnchor.MiddleLeft;
-                _meshText.alignment = TextAlignment.Left;
-                _meshText.color = new Color(1f, 0.93f, 0.71f, 1f);
-                _meshText.text = BuildDisplayText();
-                MeshRenderer? renderer = _meshRoot.GetComponent<MeshRenderer>();
-                if (renderer != null && _meshText.font != null)
-                    renderer.material = _meshText.font.material;
-                _meshLevelAnchor = candidate;
-                _loggedMissingLevelMesh = false;
-                Plugin.Logger.LogInfo("[GoblinTimer] Found 'Level NN' TextMesh on native UI layer. " +
-                    "Using local-rig sibling beside " + candidate.transform.name +
-                    "; font size=" + _meshText.fontSize + " characterSize=" +
-                    _meshText.characterSize.ToString("0.000") + ".");
-                return;
-            }
-            if (!_loggedMissingLevelMesh)
-            {
-                _loggedMissingLevelMesh = true;
-                Plugin.Logger.LogInfo("[GoblinTimer] No level-number TextMesh on player UI layer; " +
-                    "independent fallback will remain visible.");
-            }
-        }
-        catch (Exception ex)
-        {
-            Plugin.Logger.LogWarning("[GoblinTimer] Level TextMesh search failed: " +
-                ex.GetType().Name + ": " + ex.Message);
-        }
+        string estimate = (now - last >= TimeSpan.FromHours(24)) ? " ~" : "";
+        return "Goblin: " + SpawnClock.FormatRemaining(next - now) + estimate;
     }
 
 #if ORBUS_UI_AVAILABLE
-    private void FindNativeLevelLabel()
+    private static bool IsPlayerTopHud(Canvas candidate)
     {
-        // Only consider the player's own live HUD. This avoids journal entries,
-        // nameplates, enemy level text, inactive prefabs and text in the world.
         try
         {
-            foreach (Text candidate in Resources.FindObjectsOfTypeAll<Text>())
+            if (!candidate.gameObject.activeInHierarchy ||
+                candidate.name != "Canvas")
+                return false;
+
+            Transform? hud = candidate.transform.parent;
+            Transform? rig = hud?.parent;
+            return hud != null && rig != null &&
+                hud.name == "TopHUD" &&
+                rig.name.StartsWith("PlayerRigv4", StringComparison.Ordinal);
+        }
+        catch { return false; }
+    }
+
+    private void AttachToNativeTopHud()
+    {
+        try
+        {
+            Canvas? found = null;
+            foreach (Canvas canvas in Resources.FindObjectsOfTypeAll<Canvas>())
             {
-                if (candidate == null || !candidate.gameObject.activeInHierarchy) continue;
-                string label = candidate.text ?? "";
-                label = label.Replace('\n', ' ').Trim();
-                if (!label.StartsWith("Level ", StringComparison.OrdinalIgnoreCase)) continue;
+                if (canvas != null && IsPlayerTopHud(canvas))
+                {
+                    found = canvas;
+                    break;
+                }
+            }
 
-                string suffix = label.Substring(6).Trim();
-                if (suffix.Length == 0 || suffix.Length > 4 ||
-                    !int.TryParse(suffix, out _)) continue;
-                if (!IsUnderLocalRig(candidate.transform)) continue;
-
-                RectTransform? levelRect = candidate.GetComponent<RectTransform>();
-                Transform? parent = candidate.transform.parent;
-                if (levelRect == null || parent == null) continue;
-
-                if (_nativeRoot != null) UnityEngine.Object.Destroy(_nativeRoot);
-
-                var go = new GameObject("OrbusGoblinTimer.NearPlayerLevel");
-                go.layer = candidate.gameObject.layer;
-                var rect = go.AddComponent<RectTransform>();
-                go.transform.SetParent(parent, false);
-                rect.anchorMin = levelRect.anchorMin;
-                rect.anchorMax = levelRect.anchorMax;
-                rect.pivot = levelRect.pivot;
-                // Keep the same height, but to the right of the Level label;
-                // no movement of any original HUD elements.
-                float xOffset = Mathf.Max(110f, candidate.preferredWidth + 24f);
-                rect.anchoredPosition = levelRect.anchoredPosition + new Vector2(xOffset, 0f);
-                rect.sizeDelta = new Vector2(430f,
-                    Mathf.Max(55f, levelRect.rect.height));
-                rect.localRotation = levelRect.localRotation;
-                rect.localScale = levelRect.localScale;
-
-                // Avoid disturbing any native Horizontal/VerticalLayoutGroup parent.
-                var layoutElement = go.AddComponent<LayoutElement>();
-                layoutElement.ignoreLayout = true;
-
-                Text text = go.AddComponent<Text>();
-                text.font = candidate.font ?? Resources.GetBuiltinResource<Font>("Arial.ttf");
-                text.fontSize = Mathf.Max(24, candidate.fontSize);
-                text.fontStyle = FontStyle.Bold;
-                text.alignment = TextAnchor.MiddleLeft;
-                text.color = new Color(1f, 0.93f, 0.75f, 1f);
-                text.raycastTarget = false;
-                text.supportRichText = false;
-                text.horizontalOverflow = HorizontalWrapMode.Overflow;
-                text.verticalOverflow = VerticalWrapMode.Overflow;
-                text.text = BuildDisplayText();
-
-                _nativeRoot = go;
-                _nativeText = text;
-                _levelAnchor = candidate;
-                _loggedMissingLevel = false;
-                Plugin.Logger.LogInfo("[GoblinTimer] Found native Level HUD: '" +
-                    label + "' at " + candidate.transform.name +
-                    ". Added matching-size label as Canvas sibling with X offset=" +
-                    xOffset.ToString("0") + ", fontSize=" + text.fontSize + ".");
-                if (_fallbackRoot != null) _fallbackRoot.SetActive(false);
+            if (found == null)
+            {
+                if (!_warnedNoHud)
+                {
+                    _warnedNoHud = true;
+                    Plugin.Logger.LogWarning("[GoblinTimer] Waiting for PlayerRigv4/TopHUD/Canvas. " +
+                        "No camera/floating fallback will appear.");
+                }
                 return;
             }
 
-            if (!_loggedMissingLevel)
+            if (_entry != null)
             {
-                _loggedMissingLevel = true;
-                Plugin.Logger.LogWarning("[GoblinTimer] Native 'Level NN' Unity UI label not found. " +
-                    "Showing much larger upper-left fallback; native font matching unavailable.");
+                UnityEngine.Object.Destroy(_entry);
+                _entry = null;
+                _label = null;
+            }
+
+            _hudCanvas = found;
+            _warnedNoHud = false;
+
+            RectTransform? parentRect = found.GetComponent<RectTransform>();
+            if (parentRect == null)
+            {
+                Plugin.Logger.LogWarning("[GoblinTimer] Native TopHUD Canvas has no RectTransform.");
+                return;
+            }
+
+            // The inspector measured TopHUD/Canvas at 1 x 1 local UI units.
+            // Scale from its actual bounds, not headset world metres.
+            // This layout occupies roughly 60% of the canvas width and
+            // a thin single line in the upper part of the native HUD.
+            float width = Mathf.Max(0.1f, parentRect.rect.width);
+            float height = Mathf.Max(0.1f, parentRect.rect.height);
+            float lineHeight = height * 0.065f;
+            float scale = lineHeight / 40f;
+
+            _entry = new GameObject("OrbusGoblinTimer.NativeTopHudLabel");
+            _entry.layer = found.gameObject.layer; // Native HUD: UI layer 5.
+            RectTransform rect = _entry.AddComponent<RectTransform>();
+            rect.SetParent(found.transform, false);
+            rect.anchorMin = new Vector2(0.055f, 0.91f);
+            rect.anchorMax = rect.anchorMin;
+            rect.pivot = new Vector2(0f, 0.5f);
+            rect.sizeDelta = new Vector2(width * 0.65f / scale, 40f);
+            rect.anchoredPosition = Vector2.zero;
+            rect.localScale = new Vector3(scale, scale, scale);
+            rect.localRotation = Quaternion.identity;
+
+            LayoutElement layout = _entry.AddComponent<LayoutElement>();
+            layout.ignoreLayout = true;
+
+            _label = _entry.AddComponent<Text>();
+            _label.font = ResolveNativeFont(found);
+            _label.fontSize = 27;
+            _label.fontStyle = FontStyle.Bold;
+            _label.color = new Color(1f, 0.93f, 0.76f, 0.98f);
+            _label.alignment = TextAnchor.MiddleLeft;
+            _label.supportRichText = false;
+            _label.raycastTarget = false;
+            _label.horizontalOverflow = HorizontalWrapMode.Overflow;
+            _label.verticalOverflow = VerticalWrapMode.Overflow;
+            _label.text = DisplayText();
+            _nextRefresh = 0f;
+
+            Plugin.Logger.LogInfo("[GoblinTimer] ATTACHED to native " +
+                "PlayerRigv4/TopHUD/Canvas, not a camera. " +
+                "canvasSize=(" + width.ToString("0.000") + "," +
+                height.ToString("0.000") + "), childScale=" +
+                scale.ToString("0.000000") + ", label='" + _label.text +
+                "', layer=" + _entry.layer + ", nativeCanvasMode=" +
+                found.renderMode + ".");
+            if (!_loggedHierarchy)
+            {
+                _loggedHierarchy = true;
+                LogNativeHudChildren(found.transform, 0, 22);
             }
         }
         catch (Exception ex)
         {
-            Plugin.Logger.LogWarning("[GoblinTimer] Level HUD search failed: " +
+            Plugin.Logger.LogError("[GoblinTimer] Native TopHUD creation failed: " +
                 ex.GetType().Name + ": " + ex.Message);
         }
     }
 
-#endif
-
-    private static bool IsUnderLocalRig(Transform transform)
+    private static Font ResolveNativeFont(Canvas root)
     {
-        Transform? current = transform;
-        for (int depth = 0; depth < 30 && current != null; depth++)
+        try
         {
-            if (current.name.StartsWith("PlayerRigv4", StringComparison.OrdinalIgnoreCase))
-                return true;
-            current = current.parent;
+            // Borrow the font of any existing Orbus UI text inside the
+            // same TopHUD if available, otherwise use Unity's built-in font.
+            foreach (Text candidate in Resources.FindObjectsOfTypeAll<Text>())
+            {
+                if (candidate == null || candidate.font == null ||
+                    candidate.gameObject.name == "OrbusGoblinTimer.NativeTopHudLabel")
+                    continue;
+                Transform? node = candidate.transform;
+                for (int depth = 0; depth < 10 && node != null; depth++)
+                {
+                    if (node == root.transform)
+                        return candidate.font;
+                    node = node.parent;
+                }
+            }
         }
-        return false;
+        catch (Exception ex)
+        {
+            Plugin.Logger.LogWarning("[GoblinTimer] Native font lookup: " + ex.Message);
+        }
+        return Resources.GetBuiltinResource<Font>("Arial.ttf");
     }
 
-    // Win32 is used for the manual PC keyboard fallback, as in the already
-    // working RebornCam shortcuts. No Unity InputLegacyModule dependency.
-    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static void LogNativeHudChildren(Transform parent, int depth, int budget)
+    {
+        try
+        {
+            // This log gives us names and component types of the real HUD,
+            // without altering game components or recording player content.
+            int count = 0;
+            for (int i = 0; i < parent.childCount && count < budget; i++)
+            {
+                Transform child = parent.GetChild(i);
+                if (child == null ||
+                    child.name == "OrbusGoblinTimer.NativeTopHudLabel")
+                    continue;
+
+                RectTransform? rect = child.GetComponent<RectTransform>();
+                Text? label = child.GetComponent<Text>();
+                Plugin.Logger.LogInfo("[GoblinTimer] NativeTopHUD child " +
+                    new string(' ', depth * 2) + child.name +
+                    " active=" + child.gameObject.activeInHierarchy +
+                    " layer=" + child.gameObject.layer +
+                    " rect=" + (rect != null ?
+                        "(" + rect.rect.width.ToString("0.000") +
+                        " x " + rect.rect.height.ToString("0.000") + ")" : "(none)") +
+                    " localPos=" + child.localPosition +
+                    " UI.Text=" + (label != null) +
+                    (label != null ? " fontSize=" + label.fontSize : ""));
+                count++;
+                if (depth < 2 && child.childCount > 0)
+                    LogNativeHudChildren(child, depth + 1, Math.Min(8, budget - count));
+            }
+        }
+        catch (Exception ex)
+        {
+            Plugin.Logger.LogWarning("[GoblinTimer] Native HUD survey failed: " +
+                ex.GetType().Name + ": " + ex.Message);
+        }
+    }
+#endif
+
+    [DllImport("user32.dll")]
     private static extern short GetAsyncKeyState(int key);
-    private bool _chordWasDown;
+
     private bool ManualSyncPressed()
     {
-        const int Control = 0x11;
+        const int Ctrl = 0x11;
         const int Shift = 0x10;
         const int F6 = 0x75;
-        bool focus = Application.isFocused;
-        bool chord = focus &&
-            (GetAsyncKeyState(Control) & 0x8000) != 0 &&
+        bool held = Application.isFocused &&
+            (GetAsyncKeyState(Ctrl) & 0x8000) != 0 &&
             (GetAsyncKeyState(Shift) & 0x8000) != 0 &&
             (GetAsyncKeyState(F6) & 0x8000) != 0;
-        bool pressed = chord && !_chordWasDown;
-        _chordWasDown = chord;
-        return pressed;
+        bool justPressed = held && !_chordWasDown;
+        _chordWasDown = held;
+        return justPressed;
     }
 
     private void OnDestroy()
     {
 #if ORBUS_UI_AVAILABLE
-        if (_nativeRoot != null) UnityEngine.Object.Destroy(_nativeRoot);
+        if (_entry != null)
+            UnityEngine.Object.Destroy(_entry);
 #endif
-        if (_meshRoot != null) UnityEngine.Object.Destroy(_meshRoot);
-        if (_fallbackRoot != null) UnityEngine.Object.Destroy(_fallbackRoot);
     }
 }

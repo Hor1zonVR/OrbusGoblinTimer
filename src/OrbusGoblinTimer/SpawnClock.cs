@@ -41,7 +41,7 @@ public static class SpawnClock
         if (intervalHours < 1 || intervalHours > 24)
             throw new ArgumentOutOfRangeException(nameof(intervalHours));
         long period = TimeSpan.FromHours(intervalHours).Ticks;
-        long elapsed = now.UtcTicks - lastSpawn.UtcTicks;
+        long elapsed = now.UtcDateTime.Ticks - lastSpawn.UtcDateTime.Ticks;
         if (elapsed < 0) return lastSpawn;
         long nextIndex = elapsed / period + 1;
         return lastSpawn.AddTicks(nextIndex * period);

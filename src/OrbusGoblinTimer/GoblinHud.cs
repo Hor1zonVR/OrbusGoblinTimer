@@ -27,6 +27,7 @@ public sealed class GoblinHud : MonoBehaviour
     private bool _warnedNoInterop;
 #endif
     private bool _chordWasDown;
+    private bool _diagnosticChordWasDown;
 
     private void Start()
     {
@@ -36,6 +37,9 @@ public sealed class GoblinHud : MonoBehaviour
 
     private void Update()
     {
+        if (DiagnosticSurveyPressed())
+            AnnouncementObserver.RunManualMetadataSurvey();
+
         if (ManualSyncPressed())
         {
             Plugin.OnObservedSpawn("manual-CtrlShiftF6");
@@ -167,7 +171,7 @@ public sealed class GoblinHud : MonoBehaviour
             _entry.layer = found.gameObject.layer; // Native HUD: UI layer 5.
             RectTransform rect = _entry.AddComponent<RectTransform>();
             rect.SetParent(found.transform, false);
-            rect.anchorMin = new Vector2(0.055f, 0.91f);
+            rect.anchorMin = new Vector2(0.32f, 0.975f);
             rect.anchorMax = rect.anchorMin;
             rect.pivot = new Vector2(0f, 0.5f);
             rect.sizeDelta = new Vector2(width * 0.65f / scale, 40f);
@@ -279,6 +283,20 @@ public sealed class GoblinHud : MonoBehaviour
 
     [DllImport("user32.dll")]
     private static extern short GetAsyncKeyState(int key);
+
+    private bool DiagnosticSurveyPressed()
+    {
+        const int Ctrl = 0x11;
+        const int Shift = 0x10;
+        const int G = 0x47;
+        bool held = Application.isFocused &&
+            (GetAsyncKeyState(Ctrl) & 0x8000) != 0 &&
+            (GetAsyncKeyState(Shift) & 0x8000) != 0 &&
+            (GetAsyncKeyState(G) & 0x8000) != 0;
+        bool pressed = held && !_diagnosticChordWasDown;
+        _diagnosticChordWasDown = held;
+        return pressed;
+    }
 
     private bool ManualSyncPressed()
     {

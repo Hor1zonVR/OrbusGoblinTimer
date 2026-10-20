@@ -171,7 +171,7 @@ public sealed class GoblinHud : MonoBehaviour
             _entry.layer = found.gameObject.layer; // Native HUD: UI layer 5.
             RectTransform rect = _entry.AddComponent<RectTransform>();
             rect.SetParent(found.transform, false);
-            rect.anchorMin = new Vector2(0.32f, 0.975f);
+            rect.anchorMin = new Vector2(0.13f, 0.91f);
             rect.anchorMax = rect.anchorMin;
             rect.pivot = new Vector2(0f, 0.5f);
             rect.sizeDelta = new Vector2(width * 0.65f / scale, 40f);
